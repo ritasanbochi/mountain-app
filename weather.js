@@ -1,5 +1,5 @@
 // weather.js
-// ダミー天気データ生成（API差し替え前提・UI完全互換版）
+// Open-Meteo 実データ版（GitHub Pages対応・APIキー不要）
 
 export const TIME_SLOTS = [
   "06:00",
@@ -10,11 +10,10 @@ export const TIME_SLOTS = [
   "16:00"
 ];
 
-// A = 良好 / B = 注意 / C = 悪天候
-const SCORES = ["A", "B", "C"];
-
 /**
- * UI / API 共通フォーマット
+ * Open-Meteo API から天気を取得し
+ * UI互換フォーマットで A/B/C を返す
+ *
  * {
  *   "YYYY-MM-DD": {
  *     "06:00": "A",
@@ -24,38 +23,39 @@ const SCORES = ["A", "B", "C"];
  * }
  */
 export async function generateWeatherScore(name, lat, lng) {
+  const url =
+    `https://api.open-meteo.com/v1/forecast` +
+    `?latitude=${lat}` +
+    `&longitude=${lng}` +
+    `&hourly=precipitation,windspeed_10m,cloudcover` +
+    `&forecast_days=4` +
+    `&timezone=Asia/Tokyo`;
+
+  const res = await fetch(url);
+  const data = await res.json();
+
   const result = {};
 
-  for (let d = 0; d <= 3; d++) {
-    const dateKey = getDateKey(d);
-    result[dateKey] = {};
+  data.hourly.time.forEach((isoTime, i) => {
+    const date = isoTime.slice(0, 10);
+    const hour = isoTime.slice(11, 16);
 
-    TIME_SLOTS.forEach((time, index) => {
-      // 内部は index ベースで生成
-      const score = randomScore();
+    if (!TIME_SLOTS.includes(hour)) return;
 
-      // UI互換（文字列キー）
-      result[dateKey][time] = score;
+    if (!result[date]) result[date] = {};
 
-      // 将来API差し替え用（indexキーも保持）
-      result[dateKey][index] = score;
-    });
-  }
+    const rain = data.hourly.precipitation[i]; // mm
+    const wind = data.hourly.windspeed_10m[i]; // m/s
+
+    result[date][hour] = scoreFromWeather(rain, wind);
+  });
 
   return result;
 }
 
-/* ===== utils ===== */
-
-function getDateKey(add) {
-  const d = new Date();
-  d.setDate(d.getDate() + add);
-  return d.toISOString().slice(0, 10);
-}
-
-function randomScore() {
-  const r = Math.random();
-  if (r < 0.5) return "A";
-  if (r < 0.8) return "B";
+/* ===== スコア判定 ===== */
+function scoreFromWeather(rain, wind) {
+  if (rain < 0.5 && wind < 8) return "A";
+  if (rain < 3 && wind < 12) return "B";
   return "C";
 }
