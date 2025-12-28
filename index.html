@@ -57,6 +57,7 @@ body { margin:0; font-family: system-ui, -apple-system, BlinkMacSystemFont, sans
 .badge-dummy{ background:#fff0f0; border:1px solid #e0a3a3; }
 
 hr{ border:none; border-top:1px solid #ddd; margin:8px 0; }
+small{ color:#555; }
 
 /* ===== スマホ対応 ===== */
 @media (max-width:768px){
@@ -111,7 +112,7 @@ hr{ border:none; border-top:1px solid #ddd; margin:8px 0; }
 
 <script type="module">
 import mountains from "./mountains.js";
-import { generateWeatherScore, TIME_SLOTS } from "./weather.js";
+import { generateWeatherScore } from "./weather.js";
 
 window.mountains = mountains; // Console確認用
 
@@ -139,16 +140,14 @@ const dayTitles = ["今日","1日後","2日後","3日後"];
 /* ===== 地図 ===== */
 const map = L.map("map").setView([36.5, 138], 5);
 
-// 陰影（あった方が分かりやすい）
 L.tileLayer(
   "https://cyberjapandata.gsi.go.jp/xyz/hillshademap/{z}/{x}/{y}.png",
   { opacity: 0.5, attribution:"地理院 陰影" }
 ).addTo(map);
 
-// 地図
 L.tileLayer(
   "https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png",
-  { opacity: 0.8, attribution:"地理院 地図" }
+  { opacity: 0.85, attribution:"地理院 地図" }
 ).addTo(map);
 
 const markerLayer = L.layerGroup().addTo(map);
@@ -163,7 +162,7 @@ const icon = color => L.icon({
 const icons = { A:icon("green"), B:icon("yellow"), C:icon("red") };
 const scorePriority = { A:3, B:2, C:1 };
 
-/* ===== ベスト時間（その日内のTIME_SLOTSのみで評価）===== */
+/* ===== ベスト時間（その日内のtimeSlotsだけで評価）===== */
 function getBestTime(weather, dateKey){
   const w = weather?.[dateKey];
   if (!w) return null;
@@ -177,20 +176,57 @@ function getBestTime(weather, dateKey){
   return best;
 }
 
-/* ===== ポップアップHTML（今日〜3日後の一覧復活）===== */
+/* ===== 根拠取得 ===== */
+function getDetail(m, dateKey, time){
+  const d = m.weather?._details?.[dateKey]?.[time];
+  return d || null;
+}
+
+function fmt(n, digits=1){
+  if (n === null || n === undefined) return "-";
+  const v = Number(n);
+  if (!Number.isFinite(v)) return "-";
+  return v.toFixed(digits);
+}
+
+/* ===== ポップアップHTML：スコア + 根拠 + 今日〜3日後一覧 ===== */
 function popupHtml(m, time){
   const meta = m.weather?._meta;
-  const src = meta?.source === "api" ? "API" : "DUMMY";
-  const badgeClass = meta?.source === "api" ? "badge-api" : "badge-dummy";
+  const isApi = meta?.source === "api";
+  const badgeClass = isApi ? "badge-api" : "badge-dummy";
+  const srcText = isApi ? "API" : "DUMMY";
+  const reason = (!isApi && meta?.reason) ? `<br><small>取得失敗: ${escapeHtml(meta.reason)}</small>` : "";
 
+  // 選択日の根拠（表示中の日付）
+  const day = Number(document.getElementById("day").value);
+  const dateKey = getDateKey(day);
+  const dt = getDetail(m, dateKey, time);
+
+  const evidence = dt ? `
+    <b>根拠（${dayTitles[day]} ${dateKey} ${time}）</b><br>
+    降水：${fmt(dt.precipitation,1)} mm / 風速：${fmt(dt.windspeed,1)} m/s<br>
+    突風：${fmt(dt.gust,1)} m/s / 気温：${fmt(dt.temp,1)} ℃<br>
+    weathercode：${dt.weathercode}
+  ` : `
+    <b>根拠（${dayTitles[day]} ${dateKey} ${time}）</b><br>
+    -（ダミー or 取得データ不足）
+  `;
+
+  // 今日〜3日後（選択時間帯）の一覧：スコア + 可能なら根拠も
   const lines = [];
   for (let d = 0; d <= 3; d++) {
     const dk = getDateKey(d);
     const s = m.weather?.[dk]?.[time] ?? "-";
-    lines.push(`${dayTitles[d]}（${dk}）：<b>${s}</b>`);
+    const di = getDetail(m, dk, time);
+
+    const extra = di
+      ? `（降水 ${fmt(di.precipitation,1)}mm / 風 ${fmt(di.windspeed,1)}m/s）`
+      : "";
+
+    lines.push(`${dayTitles[d]}（${dk}）：<b>${s}</b> ${extra}`);
   }
 
-  // “おすすめ日”（選択時間帯でAが最優先の最良日）
+  // おすすめ日（この時間帯で最良）
   let bestDay = null;
   for (let d = 0; d <= 3; d++) {
     const dk = getDateKey(d);
@@ -199,22 +235,21 @@ function popupHtml(m, time){
     if (!bestDay || scorePriority[s] > scorePriority[bestDay.score]) bestDay = { date: dk, day: dayTitles[d], score: s };
   }
 
-  const reason = meta?.source === "dummy" && meta?.reason ? `<br><small>理由: ${escapeHtml(meta.reason)}</small>` : "";
-
   return `
     <div class="popup">
       <b>${escapeHtml(m.name)}</b>
-      <span class="badge ${badgeClass}">${src}</span><br>
+      <span class="badge ${badgeClass}">${srcText}</span><br>
       標高：${m.elev} m<br>
       難易度：${escapeHtml(m.level)}<br>
 
       <hr>
+      ${evidence}
 
+      <hr>
       <b>${time} の天気（今日〜3日後）</b><br>
       ${lines.join("<br>")}
 
       <hr>
-
       <b>おすすめ：</b>
       ${bestDay ? `${bestDay.day}（${bestDay.date} / ${bestDay.score}）` : "判定不可"}
       ${reason}
@@ -238,15 +273,16 @@ function drawList(items, day){
 
   items.forEach(({ m, best, marker }) => {
     const meta = m.weather?._meta;
-    const src = meta?.source === "api" ? "API" : "DUMMY";
-    const badgeClass = meta?.source === "api" ? "badge-api" : "badge-dummy";
+    const isApi = meta?.source === "api";
+    const badgeClass = isApi ? "badge-api" : "badge-dummy";
+    const srcText = isApi ? "API" : "DUMMY";
 
     const div = document.createElement("div");
     div.className = "list-item";
     div.innerHTML = `
       <b>${escapeHtml(m.name)}</b>
       ${best?.score==="A" ? "<span class='star'>★</span>" : ""}
-      <span class="badge ${badgeClass}">${src}</span><br>
+      <span class="badge ${badgeClass}">${srcText}</span><br>
       標高:${m.elev}m / ${escapeHtml(m.level)}<br>
       ベスト:${best ? `${best.time}（${best.score}）` : "-"}
     `;
@@ -293,22 +329,23 @@ function draw(){
   }
 
   drawList(items, day);
-
-  // レイアウト変化対策（スマホで地図がズレることがある）
   setTimeout(() => map.invalidateSize(), 200);
 }
 
 /* ===== 初期化 ===== */
 async function init(){
-  // まず天気を作る（API or dummy）
+  // まず天気生成（API or dummy）
   await Promise.all(mountains.map(async m => {
     if (!m.weather || Object.keys(m.weather).length === 0) {
       m.weather = await generateWeatherScore(m.name, m.lat, m.lng);
     }
   }));
 
-  // Console用：どれがAPIか一発で分かる
-  console.log("weather sample meta", mountains[0].weather?._meta);
+  // ここで “APIが混じっているか” を確認できるログ
+  const apiCount = mountains.filter(m => m.weather?._meta?.source === "api").length;
+  const dummyCount = mountains.length - apiCount;
+  console.log("weather meta sample", mountains[0].weather?._meta);
+  console.log(`weather sources: api=${apiCount}, dummy=${dummyCount}`);
 
   document.querySelectorAll("#control input,#control select")
     .forEach(e => e.addEventListener("change", draw));
