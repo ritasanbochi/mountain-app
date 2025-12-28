@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>百名山 登山マップ</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+
+<style>
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* ===== コントロール ===== */
+#control {
+  padding: 10px;
+  background: #f4f4f4;
+  font-size: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+#control b {
+  margin-right: 4px;
+}
+
+#control label {
+  white-space: nowrap;
+}
+
+/* ===== レイアウト ===== */
+#container {
+  height: calc(100vh - 120px);
+  position: relative;
+}
+
+#map {
+  height: 100%;
+  width: 100%;
+}
+
+/* ===== リスト ===== */
+#list {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 300px;
+  height: 100%;
+  overflow-y: auto;
+  background: #fff;
+  border-left: 1px solid #ccc;
+  font-size: 13px;
+  z-index: 1000;
+}
+
+.list-item {
+  border-bottom: 1px solid #ddd;
+  padding: 8px;
+  cursor: pointer;
+}
+
+.list-item:hover {
+  background: #eef6ff;
+}
+
+.star {
+  color: gold;
+  font-weight: bold;
+}
+
+/* ===== スマホ対応 ===== */
+@media (max-width: 768px) {
+  #list {
+    width: 100%;
+    height: 45%;
+    bottom: 0;
+    top: auto;
+    border-left: none;
+    border-top: 1px solid #ccc;
+  }
+
+  .leaflet-popup-content {
+    font-size: 15px;
+    line-height: 1.5;
+  }
+}
+</style>
+</head>
+
+<body>
+
+<div id="control">
+  <b>日付</b>
+  <select id="day">
+    <option value="0">今日</option>
+    <option value="1">1日後</option>
+    <option value="2">2日後</option>
+    <option value="3">3日後</option>
+  </select>
+
+  <b>時間帯</b>
+  <input type="range" id="timeSlider" min="0" max="5" value="0">
+  <span id="timeLabel">06–08</span>
+
+  <b>天気</b>
+  <label><input type="checkbox" value="A" checked>A</label>
+  <label><input type="checkbox" value="B" checked>B</label>
+  <label><input type="checkbox" value="C" checked>C</label>
+
+  <b>難易度</b>
+  <label><input type="checkbox" value="初級" checked>初級</label>
+  <label><input type="checkbox" value="中級" checked>中級</label>
+  <label><input type="checkbox" value="上級" checked>上級</label>
+
+  <label><input type="checkbox" id="goodOnly"> 登れる山だけ</label>
+</div>
+
+<div id="container">
+  <div id="map"></div>
+  <div id="list"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<script type="module">
+import mountains from "./mountains.js";
+import { generateWeatherScore } from "./weather.js";
+
+/* ===== 時間帯 ===== */
+const timeSlots = ["06:00","08:00","10:00","12:00","14:00","16:00"];
+const timeLabels = ["06–08","08–10","10–12","12–14","14–16","16–18"];
+
+const slider = document.getElementById("timeSlider");
+const timeLabel = document.getElementById("timeLabel");
+
+slider.oninput = () => {
+  timeLabel.textContent = timeLabels[slider.value];
+  draw();
+};
+
+const getSelectedTime = () => timeSlots[slider.value];
+
+/* ===== 日付キー ===== */
+function getDateKey(offset) {
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  return d.toISOString().slice(0, 10);
+}
+
+/* ===== 地図 ===== */
+const map = L.map("map").setView([36.5, 138], 5);
+
+L.tileLayer(
+  "https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png",
+  { opacity: 0.9 }
+).addTo(map);
+
+const markerLayer = L.layerGroup().addTo(map);
+
+/* ===== アイコン ===== */
+const icon = color => L.icon({
+  iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-${color}.png`,
+  shadowUrl: "https://unpkg.com/leaflet/dist/images/marker-shadow.png",
+  iconSize: [25,41],
+  iconAnchor: [12,41]
+});
+
+const icons = { A:icon("green"), B:icon("yellow"), C:icon("red") };
+const scorePriority = { A:3, B:2, C:1 };
+
+/* ===== ベスト時間 ===== */
+function getBestTime(weather, dateKey) {
+  const w = weather[dateKey];
+  if (!w) return null;
+
+  let best = null;
+  Object.entries(w).forEach(([t,s])=>{
+    if (!best || scorePriority[s] > scorePriority[best.score]) {
+      best = { time:t, score:s };
+    }
+  });
+  return best;
+}
+
+/* ===== 描画 ===== */
+function draw() {
+  markerLayer.clearLayers();
+  const list = document.getElementById("list");
+  list.innerHTML = "";
+
+  const day = Number(document.getElementById("day").value);
+  const time = getSelectedTime();
+  const dateKey = getDateKey(day);
+  const goodOnly = document.getElementById("goodOnly").checked;
+
+  const scores = [...document.querySelectorAll('input[value="A"]:checked,input[value="B"]:checked,input[value="C"]:checked')].map(e=>e.value);
+  const levels = [...document.querySelectorAll('input[value="初級"]:checked,input[value="中級"]:checked,input[value="上級"]:checked')].map(e=>e.value);
+
+  list.innerHTML = `<b>${["今日","1日後","2日後","3日後"][day]}に登れる山</b><br>`;
+
+  mountains.forEach(m=>{
+    const score = m.weather?.[dateKey]?.[time];
+    if (!score) return;
+    if (!scores.includes(score)) return;
+    if (!levels.includes(m.level)) return;
+    if (goodOnly && (score!=="A" || m.level==="上級")) return;
+
+    const best = getBestTime(m.weather, dateKey);
+
+    const marker = L.marker([m.lat,m.lng],{icon:icons[score]})
+      .bindPopup(`<b>${m.name}</b><br>標高:${m.elev}m<br>難易度:${m.level}`)
+      .addTo(markerLayer);
+
+    const div = document.createElement("div");
+    div.className = "list-item";
+    div.innerHTML = `
+      <b>${m.name}</b>${best?.score==="A"?"<span class='star'>★</span>":""}<br>
+      標高:${m.elev}m / ${m.level}<br>
+      ベスト:${best?`${best.time}（${best.score}）`:"-"}
+    `;
+    div.onclick = ()=>{
+      map.setView([m.lat,m.lng], 11);
+      marker.openPopup();
+    };
+    list.appendChild(div);
+  });
+
+  setTimeout(()=>map.invalidateSize(), 200);
+}
+
+/* ===== 初期化 ===== */
+async function init() {
+  await Promise.all(
+    mountains.map(async m=>{
+      if (!m.weather || Object.keys(m.weather).length===0) {
+        m.weather = await generateWeatherScore(m.name, m.lat, m.lng);
+      }
+    })
+  );
+
+  document.querySelectorAll("#control input,#control select")
+    .forEach(e=>e.addEventListener("change", draw));
+
+  draw();
+}
+
+init();
+</script>
+
+</body>
+</html>
