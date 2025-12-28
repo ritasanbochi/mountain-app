@@ -8,90 +8,74 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
 
 <style>
-body {
-  margin: 0;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-}
+body { margin:0; font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; }
 
 /* ===== コントロール ===== */
-#control {
-  padding: 10px;
-  background: #f4f4f4;
-  font-size: 14px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+#control{
+  padding:10px;
+  background:#f4f4f4;
+  font-size:14px;
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
 }
-
-#control b {
-  margin-right: 4px;
-}
-
-#control label {
-  white-space: nowrap;
-}
+#control b{ margin-right:4px; }
+#control label{ white-space:nowrap; }
 
 /* ===== レイアウト ===== */
-#container {
-  height: calc(100vh - 120px);
-  position: relative;
-}
-
-#map {
-  height: 100%;
-  width: 100%;
-}
+#container{ height:calc(100vh - 120px); position:relative; }
+#map{ height:100%; width:100%; }
 
 /* ===== リスト ===== */
-#list {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 300px;
-  height: 100%;
-  overflow-y: auto;
-  background: #fff;
-  border-left: 1px solid #ccc;
-  font-size: 13px;
-  z-index: 1000;
+#list{
+  position:absolute;
+  top:0; right:0;
+  width:300px; height:100%;
+  overflow-y:auto;
+  background:#fff;
+  border-left:1px solid #ccc;
+  font-size:13px;
+  z-index:1000;
 }
+.list-item{
+  border-bottom:1px solid #ddd;
+  padding:8px;
+  cursor:pointer;
+}
+.list-item:hover{ background:#eef6ff; }
 
-.list-item {
-  border-bottom: 1px solid #ddd;
-  padding: 8px;
-  cursor: pointer;
+.star{ color:gold; font-weight:bold; }
+.badge{
+  display:inline-block;
+  padding:1px 6px;
+  border-radius:10px;
+  font-size:11px;
+  margin-left:6px;
+  vertical-align:1px;
 }
+.badge-api{ background:#e7f7ea; border:1px solid #9ad3a5; }
+.badge-dummy{ background:#fff0f0; border:1px solid #e0a3a3; }
 
-.list-item:hover {
-  background: #eef6ff;
-}
-
-.star {
-  color: gold;
-  font-weight: bold;
-}
+hr{ border:none; border-top:1px solid #ddd; margin:8px 0; }
 
 /* ===== スマホ対応 ===== */
-@media (max-width: 768px) {
-  #list {
-    width: 100%;
-    height: 45%;
-    bottom: 0;
-    top: auto;
-    border-left: none;
-    border-top: 1px solid #ccc;
+@media (max-width:768px){
+  #list{
+    width:100%;
+    height:45%;
+    bottom:0; top:auto;
+    border-left:none;
+    border-top:1px solid #ccc;
   }
-
-  .leaflet-popup-content {
-    font-size: 15px;
-    line-height: 1.5;
+  .leaflet-popup-content{
+    font-size:15px;
+    line-height:1.5;
   }
 }
 </style>
 </head>
 
 <body>
-
 <div id="control">
   <b>日付</b>
   <select id="day">
@@ -127,8 +111,9 @@ body {
 
 <script type="module">
 import mountains from "./mountains.js";
-import { generateWeatherScore } from "./weather.js";
-window.mountains = mountains;   // ← Console確認用（超重要）
+import { generateWeatherScore, TIME_SLOTS } from "./weather.js";
+
+window.mountains = mountains; // Console確認用
 
 /* ===== 時間帯 ===== */
 const timeSlots = ["06:00","08:00","10:00","12:00","14:00","16:00"];
@@ -141,22 +126,29 @@ slider.oninput = () => {
   timeLabel.textContent = timeLabels[slider.value];
   draw();
 };
-
-const getSelectedTime = () => timeSlots[slider.value];
+const getSelectedTime = () => timeSlots[Number(slider.value)];
 
 /* ===== 日付キー ===== */
-function getDateKey(offset) {
+function getDateKey(offset){
   const d = new Date();
   d.setDate(d.getDate() + offset);
   return d.toISOString().slice(0, 10);
 }
+const dayTitles = ["今日","1日後","2日後","3日後"];
 
 /* ===== 地図 ===== */
 const map = L.map("map").setView([36.5, 138], 5);
 
+// 陰影（あった方が分かりやすい）
+L.tileLayer(
+  "https://cyberjapandata.gsi.go.jp/xyz/hillshademap/{z}/{x}/{y}.png",
+  { opacity: 0.5, attribution:"地理院 陰影" }
+).addTo(map);
+
+// 地図
 L.tileLayer(
   "https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png",
-  { opacity: 0.9 }
+  { opacity: 0.8, attribution:"地理院 地図" }
 ).addTo(map);
 
 const markerLayer = L.layerGroup().addTo(map);
@@ -168,82 +160,158 @@ const icon = color => L.icon({
   iconSize: [25,41],
   iconAnchor: [12,41]
 });
-
 const icons = { A:icon("green"), B:icon("yellow"), C:icon("red") };
 const scorePriority = { A:3, B:2, C:1 };
 
-/* ===== ベスト時間 ===== */
-function getBestTime(weather, dateKey) {
-  const w = weather[dateKey];
+/* ===== ベスト時間（その日内のTIME_SLOTSのみで評価）===== */
+function getBestTime(weather, dateKey){
+  const w = weather?.[dateKey];
   if (!w) return null;
 
   let best = null;
-  Object.entries(w).forEach(([t,s])=>{
-    if (!best || scorePriority[s] > scorePriority[best.score]) {
-      best = { time:t, score:s };
-    }
-  });
+  for (const t of timeSlots) {
+    const s = w[t];
+    if (!s) continue;
+    if (!best || scorePriority[s] > scorePriority[best.score]) best = { time:t, score:s };
+  }
   return best;
 }
 
-/* ===== 描画 ===== */
-function draw() {
-  markerLayer.clearLayers();
+/* ===== ポップアップHTML（今日〜3日後の一覧復活）===== */
+function popupHtml(m, time){
+  const meta = m.weather?._meta;
+  const src = meta?.source === "api" ? "API" : "DUMMY";
+  const badgeClass = meta?.source === "api" ? "badge-api" : "badge-dummy";
+
+  const lines = [];
+  for (let d = 0; d <= 3; d++) {
+    const dk = getDateKey(d);
+    const s = m.weather?.[dk]?.[time] ?? "-";
+    lines.push(`${dayTitles[d]}（${dk}）：<b>${s}</b>`);
+  }
+
+  // “おすすめ日”（選択時間帯でAが最優先の最良日）
+  let bestDay = null;
+  for (let d = 0; d <= 3; d++) {
+    const dk = getDateKey(d);
+    const s = m.weather?.[dk]?.[time];
+    if (!s) continue;
+    if (!bestDay || scorePriority[s] > scorePriority[bestDay.score]) bestDay = { date: dk, day: dayTitles[d], score: s };
+  }
+
+  const reason = meta?.source === "dummy" && meta?.reason ? `<br><small>理由: ${escapeHtml(meta.reason)}</small>` : "";
+
+  return `
+    <div class="popup">
+      <b>${escapeHtml(m.name)}</b>
+      <span class="badge ${badgeClass}">${src}</span><br>
+      標高：${m.elev} m<br>
+      難易度：${escapeHtml(m.level)}<br>
+
+      <hr>
+
+      <b>${time} の天気（今日〜3日後）</b><br>
+      ${lines.join("<br>")}
+
+      <hr>
+
+      <b>おすすめ：</b>
+      ${bestDay ? `${bestDay.day}（${bestDay.date} / ${bestDay.score}）` : "判定不可"}
+      ${reason}
+    </div>
+  `;
+}
+
+function escapeHtml(str){
+  return String(str)
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#39;");
+}
+
+/* ===== リスト描画 ===== */
+function drawList(items, day){
   const list = document.getElementById("list");
-  list.innerHTML = "";
+  list.innerHTML = `<b>${dayTitles[day]}に登れる山</b><br>`;
+
+  items.forEach(({ m, best, marker }) => {
+    const meta = m.weather?._meta;
+    const src = meta?.source === "api" ? "API" : "DUMMY";
+    const badgeClass = meta?.source === "api" ? "badge-api" : "badge-dummy";
+
+    const div = document.createElement("div");
+    div.className = "list-item";
+    div.innerHTML = `
+      <b>${escapeHtml(m.name)}</b>
+      ${best?.score==="A" ? "<span class='star'>★</span>" : ""}
+      <span class="badge ${badgeClass}">${src}</span><br>
+      標高:${m.elev}m / ${escapeHtml(m.level)}<br>
+      ベスト:${best ? `${best.time}（${best.score}）` : "-"}
+    `;
+    div.onclick = () => {
+      map.setView([m.lat, m.lng], 11);
+      marker.openPopup();
+    };
+    list.appendChild(div);
+  });
+}
+
+/* ===== 描画 ===== */
+function draw(){
+  markerLayer.clearLayers();
+  const items = [];
 
   const day = Number(document.getElementById("day").value);
   const time = getSelectedTime();
   const dateKey = getDateKey(day);
   const goodOnly = document.getElementById("goodOnly").checked;
 
-  const scores = [...document.querySelectorAll('input[value="A"]:checked,input[value="B"]:checked,input[value="C"]:checked')].map(e=>e.value);
-  const levels = [...document.querySelectorAll('input[value="初級"]:checked,input[value="中級"]:checked,input[value="上級"]:checked')].map(e=>e.value);
+  const scores = [...document.querySelectorAll(
+    'input[value="A"]:checked,input[value="B"]:checked,input[value="C"]:checked'
+  )].map(e => e.value);
 
-  list.innerHTML = `<b>${["今日","1日後","2日後","3日後"][day]}に登れる山</b><br>`;
+  const levels = [...document.querySelectorAll(
+    'input[value="初級"]:checked,input[value="中級"]:checked,input[value="上級"]:checked'
+  )].map(e => e.value);
 
-  mountains.forEach(m=>{
+  for (const m of mountains) {
     const score = m.weather?.[dateKey]?.[time];
-    if (!score) return;
-    if (!scores.includes(score)) return;
-    if (!levels.includes(m.level)) return;
-    if (goodOnly && (score!=="A" || m.level==="上級")) return;
+    if (!score) continue;
+    if (!scores.includes(score)) continue;
+    if (!levels.includes(m.level)) continue;
+    if (goodOnly && (score !== "A" || m.level === "上級")) continue;
 
     const best = getBestTime(m.weather, dateKey);
 
-    const marker = L.marker([m.lat,m.lng],{icon:icons[score]})
-      .bindPopup(`<b>${m.name}</b><br>標高:${m.elev}m<br>難易度:${m.level}`)
+    const marker = L.marker([m.lat, m.lng], { icon: icons[score] })
+      .bindPopup(popupHtml(m, time))
       .addTo(markerLayer);
 
-    const div = document.createElement("div");
-    div.className = "list-item";
-    div.innerHTML = `
-      <b>${m.name}</b>${best?.score==="A"?"<span class='star'>★</span>":""}<br>
-      標高:${m.elev}m / ${m.level}<br>
-      ベスト:${best?`${best.time}（${best.score}）`:"-"}
-    `;
-    div.onclick = ()=>{
-      map.setView([m.lat,m.lng], 11);
-      marker.openPopup();
-    };
-    list.appendChild(div);
-  });
+    items.push({ m, best, marker });
+  }
 
-  setTimeout(()=>map.invalidateSize(), 200);
+  drawList(items, day);
+
+  // レイアウト変化対策（スマホで地図がズレることがある）
+  setTimeout(() => map.invalidateSize(), 200);
 }
 
 /* ===== 初期化 ===== */
-async function init() {
-  await Promise.all(
-    mountains.map(async m=>{
-      if (!m.weather || Object.keys(m.weather).length===0) {
-        m.weather = await generateWeatherScore(m.name, m.lat, m.lng);
-      }
-    })
-  );
+async function init(){
+  // まず天気を作る（API or dummy）
+  await Promise.all(mountains.map(async m => {
+    if (!m.weather || Object.keys(m.weather).length === 0) {
+      m.weather = await generateWeatherScore(m.name, m.lat, m.lng);
+    }
+  }));
+
+  // Console用：どれがAPIか一発で分かる
+  console.log("weather sample meta", mountains[0].weather?._meta);
 
   document.querySelectorAll("#control input,#control select")
-    .forEach(e=>e.addEventListener("change", draw));
+    .forEach(e => e.addEventListener("change", draw));
 
   draw();
 }
