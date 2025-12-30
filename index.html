@@ -59,7 +59,7 @@ body { margin:0; font-family: system-ui, -apple-system, BlinkMacSystemFont, sans
 hr{ border:none; border-top:1px solid #ddd; margin:8px 0; }
 small{ color:#555; }
 
-/* ===== popup内の表 ===== */
+/* ===== popup内の表（根拠付き） ===== */
 .wx-table{
   width:100%;
   border-collapse:collapse;
@@ -79,6 +79,32 @@ small{ color:#555; }
   font-weight:700;
 }
 
+/* ===== ② 追加：スコア早見表（4日×6枠） ===== */
+.score-grid{
+  width:100%;
+  border-collapse:collapse;
+  font-size:12px;
+  table-layout:fixed;
+}
+.score-grid th, .score-grid td{
+  border:1px solid #ddd;
+  padding:4px 0;
+  text-align:center;
+}
+.score-grid th{
+  background:#f7f7f7;
+  font-weight:600;
+}
+.score-grid .sel{
+  outline:2px solid #5aa7ff;
+  outline-offset:-2px;
+  font-weight:800;
+  background:#eef6ff;
+}
+.score-grid .a{ background:#eaf7ee; }
+.score-grid .b{ background:#fff7db; }
+.score-grid .c{ background:#ffe7e7; }
+
 /* ===== スマホ対応 ===== */
 @media (max-width:768px){
   #list{
@@ -92,9 +118,8 @@ small{ color:#555; }
     font-size:15px;
     line-height:1.5;
   }
-  .wx-table{
-    font-size:13px;
-  }
+  .wx-table{ font-size:13px; }
+  .score-grid{ font-size:13px; }
 }
 </style>
 </head>
@@ -151,6 +176,7 @@ slider.oninput = () => {
   draw();
 };
 const getSelectedTime = () => timeSlots[Number(slider.value)];
+const getSelectedTimeIdx = () => Number(slider.value);
 
 /* ===== 日付キー ===== */
 function getDateKey(offset){
@@ -185,6 +211,57 @@ const icon = color => L.icon({
 const icons = { A:icon("green"), B:icon("yellow"), C:icon("red") };
 const scorePriority = { A:3, B:2, C:1 };
 
+/* ===== 根拠取得 ===== */
+function getDetail(m, dateKey, time){
+  const d = m.weather?._details?.[dateKey]?.[time];
+  return d || null;
+}
+function fmt(n, digits=1){
+  if (n === null || n === undefined) return "-";
+  const v = Number(n);
+  if (!Number.isFinite(v)) return "-";
+  return v.toFixed(digits);
+}
+
+/* ===== ②：スコア早見表（4×6） ===== */
+function scoreCellClass(score){
+  if (score === "A") return "a";
+  if (score === "B") return "b";
+  if (score === "C") return "c";
+  return "";
+}
+function buildScoreGridHtml(m, selDay, selTime){
+  const head = `
+    <thead>
+      <tr>
+        <th style="width:14%"></th>
+        ${timeLabels.map(l => `<th>${l}</th>`).join("")}
+      </tr>
+    </thead>
+  `;
+
+  const bodyRows = [];
+  for (let d = 0; d <= 3; d++){
+    const dk = getDateKey(d);
+    const tds = timeSlots.map(t => {
+      const s = m.weather?.[dk]?.[t] ?? "-";
+      const base = scoreCellClass(s);
+      const sel = (d === selDay && t === selTime) ? "sel" : "";
+      return `<td class="${base} ${sel}">${s}</td>`;
+    }).join("");
+    bodyRows.push(`<tr><th>${dayTitles[d]}</th>${tds}</tr>`);
+  }
+
+  return `
+    <b>スコア早見表（今日〜3日後 × 全時間帯）</b><br>
+    <table class="score-grid">
+      ${head}
+      <tbody>${bodyRows.join("")}</tbody>
+    </table>
+    <small>※ 選択中の日付×時間は枠線で強調</small>
+  `;
+}
+
 /* ===== ベスト時間（その日内のtimeSlotsだけで評価）===== */
 function getBestTime(weather, dateKey){
   const w = weather?.[dateKey];
@@ -199,20 +276,16 @@ function getBestTime(weather, dateKey){
   return best;
 }
 
-/* ===== 根拠取得 ===== */
-function getDetail(m, dateKey, time){
-  const d = m.weather?._details?.[dateKey]?.[time];
-  return d || null;
+function escapeHtml(str){
+  return String(str)
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#39;");
 }
 
-function fmt(n, digits=1){
-  if (n === null || n === undefined) return "-";
-  const v = Number(n);
-  if (!Number.isFinite(v)) return "-";
-  return v.toFixed(digits);
-}
-
-/* ===== ポップアップHTML：時間帯別一覧 + 今日〜3日後（選択時間） + おすすめ ===== */
+/* ===== ポップアップHTML：②スコア早見表 + ①根拠付き表 + 今日〜3日後（選択時間） ===== */
 function popupHtml(m, selectedTime){
   const meta = m.weather?._meta;
   const isApi = meta?.source === "api";
@@ -223,7 +296,10 @@ function popupHtml(m, selectedTime){
   const day = Number(document.getElementById("day").value);
   const dateKey = getDateKey(day);
 
-  // 選択日の「時間帯別」表
+  // ②スコア早見表
+  const grid = buildScoreGridHtml(m, day, selectedTime);
+
+  // ①選択日の「時間帯別」表（根拠付き）
   const rows = timeSlots.map((t, idx) => {
     const s = m.weather?.[dateKey]?.[t] ?? "-";
     const d = getDetail(m, dateKey, t);
@@ -253,7 +329,7 @@ function popupHtml(m, selectedTime){
     <small>※ DUMMY / データ不足の枠は「-」表示</small>
   `;
 
-  // 今日〜3日後（選択時間帯）の一覧：スコア + 可能なら根拠も
+  // 今日〜3日後（選択時間帯）の一覧
   const lines = [];
   for (let d = 0; d <= 3; d++) {
     const dk = getDateKey(d);
@@ -284,6 +360,9 @@ function popupHtml(m, selectedTime){
       難易度：${escapeHtml(m.level)}<br>
 
       <hr>
+      ${grid}
+
+      <hr>
       ${dayTable}
 
       <hr>
@@ -296,15 +375,6 @@ function popupHtml(m, selectedTime){
       ${reason}
     </div>
   `;
-}
-
-function escapeHtml(str){
-  return String(str)
-    .replaceAll("&","&amp;")
-    .replaceAll("<","&lt;")
-    .replaceAll(">","&gt;")
-    .replaceAll('"',"&quot;")
-    .replaceAll("'","&#39;");
 }
 
 /* ===== リスト描画 ===== */
