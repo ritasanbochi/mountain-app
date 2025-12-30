@@ -59,6 +59,68 @@ body { margin:0; font-family: system-ui, -apple-system, BlinkMacSystemFont, sans
 hr{ border:none; border-top:1px solid #ddd; margin:8px 0; }
 small{ color:#555; }
 
+/* ===== 詳細画面（別画面オーバーレイ：スマホ/PC共通） ===== */
+#detailOverlay{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.35);
+  z-index:9999;
+  display:none;
+}
+#detailOverlay.show{ display:block; }
+
+#detailPanel{
+  position:absolute;
+  inset:0;
+  background:#fff;
+  display:flex;
+  flex-direction:column;
+}
+#detailHeader{
+  position:sticky;
+  top:0;
+  background:#fff;
+  border-bottom:1px solid #ddd;
+  padding:10px 12px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+}
+#detailHeader b{
+  font-size:16px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  max-width:70%;
+}
+#detailClose{
+  appearance:none;
+  border:1px solid #ccc;
+  background:#f7f7f7;
+  padding:6px 10px;
+  border-radius:8px;
+  font-size:14px;
+}
+#detailBody{
+  padding:12px;
+  overflow:auto;
+  -webkit-overflow-scrolling:touch;
+}
+
+/* PCは“子画面”感：中央ダイアログ */
+@media (min-width:769px){
+  #detailPanel{
+    inset:auto;
+    top:24px; left:50%;
+    transform:translateX(-50%);
+    width:min(920px, calc(100vw - 48px));
+    height:min(86vh, 860px);
+    border-radius:14px;
+    box-shadow:0 14px 40px rgba(0,0,0,0.24);
+  }
+}
+
 /* ===== popup内の表（根拠付き） ===== */
 .wx-table{
   width:100%;
@@ -106,17 +168,12 @@ small{ color:#555; }
 .score-grid .c{ background:#ffe7e7; }
 
 /* ===== ③：スマホ用「ボトムシート」UI ===== */
-#listHeader{
-  display:none; /* PCでは出さない */
-}
-
-#listTab{
-  display:none; /* PCでは出さない */
-}
+#listHeader{ display:none; } /* PCでは出さない */
+#listTab{ display:none; }    /* PCでは出さない */
 
 /* ===== スマホ対応 ===== */
 @media (max-width:768px){
-  /* スマホはボトムシート化（PCの右固定は維持） */
+  /* スマホはボトムシート化 */
   #list{
     position:fixed;
     left:0; right:0;
@@ -127,7 +184,7 @@ small{ color:#555; }
     border-top:1px solid #ccc;
     border-radius:14px 14px 0 0;
     box-shadow: 0 -6px 18px rgba(0,0,0,0.08);
-    overflow:hidden; /* ヘッダ＋中身を分ける */
+    overflow:hidden;
     z-index:2000;
 
     transform: translateY(0);
@@ -135,13 +192,8 @@ small{ color:#555; }
     touch-action: pan-y;
     background:#fff;
   }
+  #list.is-collapsed{ transform: translateY(100%); }
 
-  /* 隠れる（下へスライド） */
-  #list.is-collapsed{
-    transform: translateY(100%);
-  }
-
-  /* ヘッダ（掴み・スワイプ領域） */
   #listHeader{
     display:flex;
     align-items:center;
@@ -150,14 +202,11 @@ small{ color:#555; }
     padding:10px 12px;
     background:#fff;
     border-bottom:1px solid #eee;
+    user-select:none;
   }
-  #listHeader .title{
-    font-weight:700;
-    font-size:14px;
-  }
+  #listHeader .title{ font-weight:700; font-size:14px; }
   #listHeader .grip{
-    width:42px;
-    height:5px;
+    width:42px; height:5px;
     border-radius:999px;
     background:#d8d8d8;
     margin:0 10px;
@@ -168,7 +217,6 @@ small{ color:#555; }
     white-space:nowrap;
   }
 
-  /* リスト中身はスクロール */
   #listBody{
     height:calc(45vh - 48px);
     overflow:auto;
@@ -189,15 +237,10 @@ small{ color:#555; }
     box-shadow: 0 6px 16px rgba(0,0,0,0.12);
     font-size:13px;
   }
-  #listTab.hidden{
-    display:none;
-  }
+  #listTab.hidden{ display:none; }
 
-  .leaflet-popup-content{
-    font-size:15px;
-    line-height:1.5;
-    max-width:92vw;
-  }
+  /* 詳細画面の文字/幅 */
+  #detailBody{ font-size:15px; line-height:1.5; }
   .wx-table{ font-size:13px; }
   .score-grid{ font-size:13px; }
 }
@@ -234,21 +277,32 @@ small{ color:#555; }
 <div id="container">
   <div id="map"></div>
 
-  <!-- ③：スマホではヘッダ＋中身の構造にする（PCではヘッダ非表示で従来通り） -->
+  <!-- スマホ：ヘッダ＋中身（PCではヘッダ非表示で従来通り） -->
   <div id="list">
     <div id="listHeader">
       <div style="display:flex; align-items:center; gap:10px;">
         <div class="grip" aria-hidden="true"></div>
         <div class="title">山リスト</div>
       </div>
-      <div class="hint">下へスワイプで隠す</div>
+      <div class="hint">下へスワイプ / タップで隠す</div>
     </div>
     <div id="listBody"></div>
   </div>
 </div>
 
-<!-- ③：スマホでリストを再表示するタブ -->
+<!-- スマホでリストを再表示するタブ -->
 <button id="listTab" class="hidden" type="button">山リスト</button>
+
+<!-- 別画面（スマホ/PC共通） -->
+<div id="detailOverlay" aria-hidden="true">
+  <div id="detailPanel" role="dialog" aria-modal="true" aria-label="山の詳細">
+    <div id="detailHeader">
+      <b id="detailTitle">山の詳細</b>
+      <button id="detailClose" type="button">閉じる</button>
+    </div>
+    <div id="detailBody"></div>
+  </div>
+</div>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
@@ -265,15 +319,11 @@ const timeLabels = ["06–08","08–10","10–12","12–14","14–16","16–18"]
 const slider = document.getElementById("timeSlider");
 const timeLabel = document.getElementById("timeLabel");
 
-/* ★今開いているポップアップを保持 */
-let openedMarker = null;
-
 slider.oninput = () => {
   timeLabel.textContent = timeLabels[slider.value];
   updateView(); // 再生成せず更新
 };
 const getSelectedTime = () => timeSlots[Number(slider.value)];
-const getSelectedTimeIdx = () => Number(slider.value);
 
 /* ===== 日付キー ===== */
 function getDateKey(offset){
@@ -344,7 +394,6 @@ function buildScoreGridHtml(m, selDay, selTime){
       </tr>
     </thead>
   `;
-
   const bodyRows = [];
   for (let d = 0; d <= 3; d++){
     const dk = getDateKey(d);
@@ -356,7 +405,6 @@ function buildScoreGridHtml(m, selDay, selTime){
     }).join("");
     bodyRows.push(`<tr><th>${dayTitles[d]}</th>${tds}</tr>`);
   }
-
   return `
     <b>スコア早見表（今日〜3日後 × 全時間帯）</b><br>
     <table class="score-grid">
@@ -371,7 +419,6 @@ function buildScoreGridHtml(m, selDay, selTime){
 function getBestTime(weather, dateKey){
   const w = weather?.[dateKey];
   if (!w) return null;
-
   let best = null;
   for (const t of timeSlots) {
     const s = w[t];
@@ -381,8 +428,8 @@ function getBestTime(weather, dateKey){
   return best;
 }
 
-/* ===== ポップアップHTML ===== */
-function popupHtml(m, selectedTime){
+/* ===== 詳細HTML（旧popup内容そのまま） ===== */
+function detailHtml(m, selectedTime){
   const meta = m.weather?._meta;
   const isApi = meta?.source === "api";
   const badgeClass = isApi ? "badge-api" : "badge-dummy";
@@ -428,11 +475,9 @@ function popupHtml(m, selectedTime){
     const dk = getDateKey(d);
     const s = m.weather?.[dk]?.[selectedTime] ?? "-";
     const di = getDetail(m, dk, selectedTime);
-
     const extra = di
       ? `（降水 ${fmt(di.precipitation,1)}mm / 風 ${fmt(di.windspeed,1)}m/s / 突風 ${fmt(di.gust,1)}m/s / 気温 ${fmt(di.temp,1)}℃）`
       : "";
-
     lines.push(`${dayTitles[d]}（${dk}）：<b>${s}</b> ${extra}`);
   }
 
@@ -468,6 +513,41 @@ function popupHtml(m, selectedTime){
     </div>
   `;
 }
+
+/* ===== 別画面（オーバーレイ）制御 ===== */
+const detailOverlay = document.getElementById("detailOverlay");
+const detailTitle = document.getElementById("detailTitle");
+const detailBody = document.getElementById("detailBody");
+const detailClose = document.getElementById("detailClose");
+
+let currentDetail = null; // { mountain, marker }
+
+function openDetail(m, marker){
+  currentDetail = { mountain: m, marker };
+  detailTitle.textContent = m.name;
+  detailBody.innerHTML = detailHtml(m, getSelectedTime());
+
+  detailOverlay.classList.add("show");
+  detailOverlay.setAttribute("aria-hidden","false");
+  document.body.style.overflow = "hidden";
+}
+function closeDetail(){
+  detailOverlay.classList.remove("show");
+  detailOverlay.setAttribute("aria-hidden","true");
+  detailBody.innerHTML = "";
+  document.body.style.overflow = "";
+  currentDetail = null;
+}
+
+detailClose.onclick = closeDetail;
+// 背景クリックで閉じる（パネル外）
+detailOverlay.addEventListener("click", (e) => {
+  if (e.target === detailOverlay) closeDetail();
+});
+// ESCで閉じる（PC）
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && detailOverlay.classList.contains("show")) closeDetail();
+});
 
 /* ===== ③：スマホの山リスト「隠す/出す」 ===== */
 const listEl = document.getElementById("list");
@@ -505,8 +585,9 @@ function initMobileListGestures(){
     setListCollapsed(false);
   });
 
-  // スワイプで隠す（ヘッダ上だけ）
+  // 下スワイプで隠す（ヘッダ上だけ：dy>120px）
   let startY = 0;
+  let lastDy = 0;
   let dragging = false;
 
   listHeaderEl.addEventListener("touchstart", (e) => {
@@ -514,42 +595,7 @@ function initMobileListGestures(){
     if (listCollapsed) return;
     dragging = true;
     startY = e.touches[0].clientY;
-  }, { passive:true });
-
-  listHeaderEl.addEventListener("touchmove", (e) => {
-    if (!dragging) return;
-    const y = e.touches[0].clientY;
-    const dy = y - startY;
-    if (dy <= 0) return; // 上方向は無視（拡張操作はタブでOK）
-    // 追従（少しだけ）
-    listEl.style.transition = "none";
-    listEl.style.transform = `translateY(${Math.min(dy, 220)}px)`;
-  }, { passive:true });
-
-  listHeaderEl.addEventListener("touchend", () => {
-    if (!dragging) return;
-    dragging = false;
-
-    // 戻す
-    listEl.style.transition = "";
-    listEl.style.transform = "";
-
-    // 大きく下に動いたら隠す
-    // （体感しきい値）
-    const rect = listHeaderEl.getBoundingClientRect();
-    // dy を保持してないので transform を見ずに、直近動きで判断できない。
-    // 代わりに「軽くでも引っ張ったら隠す」だと誤爆するので、ここはタップで確実に隠す運用が主。
-    // touchmove で 120px 以上引っ張ったら隠す、を実装するために dy を保持。
-  });
-
-  // dy保持版（上書き）
-  let lastDy = 0;
-  listHeaderEl.addEventListener("touchstart", (e) => {
-    if (!isMobile()) return;
-    if (listCollapsed) return;
-    dragging = true;
     lastDy = 0;
-    startY = e.touches[0].clientY;
   }, { passive:true });
 
   listHeaderEl.addEventListener("touchmove", (e) => {
@@ -558,7 +604,7 @@ function initMobileListGestures(){
     const dy = y - startY;
     lastDy = dy;
 
-    if (dy <= 0) return;
+    if (dy <= 0) return; // 上方向は無視
     listEl.style.transition = "none";
     listEl.style.transform = `translateY(${Math.min(dy, 260)}px)`;
   }, { passive:true });
@@ -575,30 +621,26 @@ function initMobileListGestures(){
     }
   });
 
-  // 画面回転/リサイズで状態補正
   window.addEventListener("resize", () => {
     setListCollapsed(isMobile() ? listCollapsed : false);
   });
 }
 
-/* ===== リスト描画（listBodyに描く） ===== */
+/* ===== リスト描画（スマホはlistBody、PCはlist直） ===== */
 function drawList(items, day){
-  // PCは #list 自体がスクロール、スマホは #listBody がスクロール
   const target = isMobile() ? listBodyEl : listEl;
 
   if (isMobile()){
-    // スマホ：ヘッダは固定で出す（CSSで表示）
     target.innerHTML = `<div style="padding:8px 10px; font-weight:700;">${dayTitles[day]}に登れる山</div>`;
   } else {
-    // PC：従来通り
     target.innerHTML = `<b>${dayTitles[day]}に登れる山</b><br>`;
   }
 
   items.forEach(({ m, best, marker }) => {
     const meta = m.weather?._meta;
-    const isApi = meta?.source === "api";
-    const badgeClass = isApi ? "badge-api" : "badge-dummy";
-    const srcText = isApi ? "API" : "DUMMY";
+    const isApiSrc = meta?.source === "api";
+    const badgeClass = isApiSrc ? "badge-api" : "badge-dummy";
+    const srcText = isApiSrc ? "API" : "DUMMY";
 
     const div = document.createElement("div");
     div.className = "list-item";
@@ -610,10 +652,9 @@ function drawList(items, day){
       ベスト:${best ? `${best.time}（${best.score}）` : "-"}
     `;
     div.onclick = () => {
-      // スマホ：山名が分かる導線として、リストをタップしたら “一旦隠す＋ピンへ移動＋ポップアップ”
       if (isMobile()) setListCollapsed(true);
       map.setView([m.lat, m.lng], 11);
-      marker.openPopup();
+      openDetail(m, marker); // ✅ 別画面
     };
     target.appendChild(div);
   });
@@ -640,12 +681,10 @@ function getState(){
   return { day, time, dateKey, goodOnly, scores, levels };
 }
 
-/* ===== ビュー更新（ポップアップ維持） ===== */
+/* ===== 表示更新（別画面もリアルタイム更新） ===== */
 function updateView(){
   const { day, time, dateKey, goodOnly, scores, levels } = getState();
   const items = [];
-
-  const reopenTarget = openedMarker;
 
   for (const entry of markerEntries){
     const m = entry.m;
@@ -663,39 +702,32 @@ function updateView(){
         markerLayer.addLayer(marker);
         entry.shown = true;
       }
-
-      const isOpenNow = marker.isPopupOpen && marker.isPopupOpen();
-      if (!isOpenNow) {
-        marker.setIcon(icons[score]);
-      }
-
-      const newHtml = popupHtml(m, time);
-      const pop = marker.getPopup();
-      if (pop) pop.setContent(newHtml);
-      else marker.bindPopup(newHtml);
+      marker.setIcon(icons[score]); // ✅ ポップアップじゃないので常時更新OK
 
       const best = getBestTime(m.weather, dateKey);
       items.push({ m, best, marker });
-    } else {
-      if (reopenTarget === marker) openedMarker = null;
 
+    } else {
       if (entry.shown){
         markerLayer.removeLayer(marker);
         entry.shown = false;
+      }
+      // フィルタで消えた山が詳細表示中なら閉じる
+      if (currentDetail?.mountain === m){
+        closeDetail();
       }
     }
   }
 
   drawList(items, day);
 
-  // ポップアップ維持（閉じたら即復帰）
-  if (reopenTarget && markerLayer.hasLayer(reopenTarget)) {
-    setTimeout(() => {
-      if (!reopenTarget.isPopupOpen()) reopenTarget.openPopup();
-    }, 0);
+  // 詳細表示中なら内容を更新（スライダー/日付変更で反映）
+  if (currentDetail?.mountain){
+    detailTitle.textContent = currentDetail.mountain.name;
+    detailBody.innerHTML = detailHtml(currentDetail.mountain, time);
   }
 
-  setTimeout(() => map.invalidateSize(), 100);
+  setTimeout(() => map.invalidateSize(), 60);
 }
 
 /* ===== 初期化 ===== */
@@ -707,31 +739,26 @@ async function init(){
   }));
 
   for (const m of mountains){
-    const marker = L.marker([m.lat, m.lng], { icon: icons["C"] }); // 仮
-    marker.bindPopup(popupHtml(m, getSelectedTime()));
+    const marker = L.marker([m.lat, m.lng], { icon: icons["C"] });
 
-    marker.on("popupopen", () => { openedMarker = marker; });
-    marker.on("popupclose", () => {
-      if (openedMarker === marker) openedMarker = null;
+    // ✅ ピンタップは“別画面”
+    marker.on("click", () => {
+      map.setView([m.lat, m.lng], Math.max(map.getZoom(), 10));
+      openDetail(m, marker);
     });
 
     markerEntries.push({ m, marker, shown:false });
   }
 
-  // 変更イベント
   document.querySelectorAll("#control input,#control select")
     .forEach(e => e.addEventListener("change", updateView));
 
   initMobileListGestures();
 
-  // 初回描画
-  const apiCount = mountains.filter(m => m.weather?._meta?.source === "api").length;
-  const dummyCount = mountains.length - apiCount;
-  console.log(`weather sources: api=${apiCount}, dummy=${dummyCount}`);
+  // 初期表示（B）：スマホは最初から隠す（タブのみ）
+  setListCollapsed(isMobile() ? true : false);
 
-  // スマホ初期：リストは表示（必要なら true にすると最初から隠れる）
-  setListCollapsed(false);
-
+  timeLabel.textContent = timeLabels[slider.value];
   updateView();
 }
 
