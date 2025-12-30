@@ -56,6 +56,24 @@ body { margin:0; font-family: system-ui, -apple-system, BlinkMacSystemFont, sans
 .badge-api{ background:#e7f7ea; border:1px solid #9ad3a5; }
 .badge-dummy{ background:#fff0f0; border:1px solid #e0a3a3; }
 
+.meta-box{
+  margin-top:6px;
+  padding:6px 8px;
+  background:#fafafa;
+  border:1px solid #eee;
+  border-radius:10px;
+  font-size:12px;
+  color:#444;
+  line-height:1.4;
+}
+.meta-line{
+  display:flex;
+  justify-content:space-between;
+  gap:8px;
+}
+.meta-line span:first-child{ color:#666; }
+.meta-warn{ color:#b00020; font-weight:600; }
+
 hr{ border:none; border-top:1px solid #ddd; margin:8px 0; }
 small{ color:#555; }
 
@@ -121,7 +139,7 @@ small{ color:#555; }
   }
 }
 
-/* ===== popup内の表（根拠付き） ===== */
+/* ===== 根拠表 ===== */
 .wx-table{
   width:100%;
   border-collapse:collapse;
@@ -141,7 +159,7 @@ small{ color:#555; }
   font-weight:700;
 }
 
-/* ===== スコア早見表（4日×6枠） ===== */
+/* ===== スコア早見表 ===== */
 .score-grid{
   width:100%;
   border-collapse:collapse;
@@ -167,13 +185,11 @@ small{ color:#555; }
 .score-grid .b{ background:#fff7db; }
 .score-grid .c{ background:#ffe7e7; }
 
-/* ===== ③：スマホ用「ボトムシート」UI ===== */
-#listHeader{ display:none; } /* PCでは出さない */
-#listTab{ display:none; }    /* PCでは出さない */
+/* ===== スマホ：ボトムシート ===== */
+#listHeader{ display:none; }
+#listTab{ display:none; }
 
-/* ===== スマホ対応 ===== */
 @media (max-width:768px){
-  /* スマホはボトムシート化 */
   #list{
     position:fixed;
     left:0; right:0;
@@ -223,7 +239,6 @@ small{ color:#555; }
     -webkit-overflow-scrolling:touch;
   }
 
-  /* 左下タブ（リストを出す） */
   #listTab{
     display:block;
     position:fixed;
@@ -239,7 +254,6 @@ small{ color:#555; }
   }
   #listTab.hidden{ display:none; }
 
-  /* 詳細画面の文字/幅 */
   #detailBody{ font-size:15px; line-height:1.5; }
   .wx-table{ font-size:13px; }
   .score-grid{ font-size:13px; }
@@ -277,7 +291,6 @@ small{ color:#555; }
 <div id="container">
   <div id="map"></div>
 
-  <!-- スマホ：ヘッダ＋中身（PCではヘッダ非表示で従来通り） -->
   <div id="list">
     <div id="listHeader">
       <div style="display:flex; align-items:center; gap:10px;">
@@ -290,10 +303,8 @@ small{ color:#555; }
   </div>
 </div>
 
-<!-- スマホでリストを再表示するタブ -->
 <button id="listTab" class="hidden" type="button">山リスト</button>
 
-<!-- 別画面（スマホ/PC共通） -->
 <div id="detailOverlay" aria-hidden="true">
   <div id="detailPanel" role="dialog" aria-modal="true" aria-label="山の詳細">
     <div id="detailHeader">
@@ -310,18 +321,14 @@ small{ color:#555; }
 import mountains from "./mountains.js";
 import { generateWeatherScore } from "./weather.js";
 
-window.mountains = mountains; // Console確認用
-
 /* ===== 時間帯 ===== */
 const timeSlots = ["06:00","08:00","10:00","12:00","14:00","16:00"];
 const timeLabels = ["06–08","08–10","10–12","12–14","14–16","16–18"];
-
 const slider = document.getElementById("timeSlider");
 const timeLabel = document.getElementById("timeLabel");
-
 slider.oninput = () => {
   timeLabel.textContent = timeLabels[slider.value];
-  updateView(); // 再生成せず更新
+  updateView();
 };
 const getSelectedTime = () => timeSlots[Number(slider.value)];
 
@@ -335,14 +342,10 @@ const dayTitles = ["今日","1日後","2日後","3日後"];
 
 /* ===== 地図 ===== */
 const map = L.map("map").setView([36.5, 138], 5);
-
-L.tileLayer(
-  "https://cyberjapandata.gsi.go.jp/xyz/hillshademap/{z}/{x}/{y}.png",
+L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/hillshademap/{z}/{x}/{y}.png",
   { opacity: 0.5, attribution:"地理院 陰影" }
 ).addTo(map);
-
-L.tileLayer(
-  "https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png",
+L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png",
   { opacity: 0.85, attribution:"地理院 地図" }
 ).addTo(map);
 
@@ -358,10 +361,9 @@ const icon = color => L.icon({
 const icons = { A:icon("green"), B:icon("yellow"), C:icon("red") };
 const scorePriority = { A:3, B:2, C:1 };
 
-/* ===== 根拠取得 ===== */
+/* ===== utils ===== */
 function getDetail(m, dateKey, time){
-  const d = m.weather?._details?.[dateKey]?.[time];
-  return d || null;
+  return m.weather?._details?.[dateKey]?.[time] ?? null;
 }
 function fmt(n, digits=1){
   if (n === null || n === undefined) return "-";
@@ -377,8 +379,63 @@ function escapeHtml(str){
     .replaceAll('"',"&quot;")
     .replaceAll("'","&#39;");
 }
+function safeDate(iso){
+  try{
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return null;
+    return d;
+  }catch{ return null; }
+}
+function fmtJpDateTime(iso){
+  const d = safeDate(iso);
+  if (!d) return "-";
+  const pad = (n) => String(n).padStart(2,"0");
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function timeAgo(iso){
+  const d = safeDate(iso);
+  if (!d) return "-";
+  const diff = Date.now() - d.getTime();
+  if (diff < 0) return "未来";
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return "たった今";
+  if (min < 60) return `${min}分前`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}時間前`;
+  const day = Math.floor(h / 24);
+  return `${day}日前`;
+}
+function buildMetaBox(m){
+  const meta = m.weather?._meta || {};
+  const source = meta.source === "api" ? "API" : "DUMMY";
+  const badgeClass = meta.source === "api" ? "badge-api" : "badge-dummy";
+  const fetched = fmtJpDateTime(meta.fetchedAt);
+  const ago = timeAgo(meta.fetchedAt);
+  const lat = (meta.lat ?? m.lat);
+  const lng = (meta.lng ?? m.lng);
+  const reason = meta.source === "dummy" && meta.reason ? meta.reason : null;
 
-/* ===== スコア早見表（4×6） ===== */
+  return `
+    <div class="meta-box">
+      <div class="meta-line">
+        <span>データ元</span>
+        <span><span class="badge ${badgeClass}">${source}</span></span>
+      </div>
+      <div class="meta-line">
+        <span>取得時刻</span>
+        <span>${fetched}（${ago}）</span>
+      </div>
+      <div class="meta-line">
+        <span>座標</span>
+        <span>${Number(lat).toFixed(3)}, ${Number(lng).toFixed(3)}</span>
+      </div>
+      ${reason ? `<div class="meta-line"><span class="meta-warn">取得失敗</span><span class="meta-warn">${escapeHtml(reason)}</span></div>` : ""}
+      <small>※ DUMMY はAPI取得失敗時の仮データです</small>
+    </div>
+  `;
+}
+
+/* ===== スコア早見表 ===== */
 function scoreCellClass(score){
   if (score === "A") return "a";
   if (score === "B") return "b";
@@ -415,7 +472,7 @@ function buildScoreGridHtml(m, selDay, selTime){
   `;
 }
 
-/* ===== ベスト時間（その日内のtimeSlotsだけで評価）===== */
+/* ===== ベスト時間 ===== */
 function getBestTime(weather, dateKey){
   const w = weather?.[dateKey];
   if (!w) return null;
@@ -428,17 +485,12 @@ function getBestTime(weather, dateKey){
   return best;
 }
 
-/* ===== 詳細HTML（旧popup内容そのまま） ===== */
+/* ===== 詳細HTML ===== */
 function detailHtml(m, selectedTime){
-  const meta = m.weather?._meta;
-  const isApi = meta?.source === "api";
-  const badgeClass = isApi ? "badge-api" : "badge-dummy";
-  const srcText = isApi ? "API" : "DUMMY";
-  const reason = (!isApi && meta?.reason) ? `<br><small>取得失敗: ${escapeHtml(meta.reason)}</small>` : "";
-
   const day = Number(document.getElementById("day").value);
   const dateKey = getDateKey(day);
 
+  const metaBox = buildMetaBox(m);
   const grid = buildScoreGridHtml(m, day, selectedTime);
 
   const rows = timeSlots.map((t, idx) => {
@@ -491,10 +543,9 @@ function detailHtml(m, selectedTime){
 
   return `
     <div class="popup">
-      <b>${escapeHtml(m.name)}</b>
-      <span class="badge ${badgeClass}">${srcText}</span><br>
-      標高：${m.elev} m<br>
-      難易度：${escapeHtml(m.level)}<br>
+      <b>${escapeHtml(m.name)}</b><br>
+      標高：${m.elev} m / 難易度：${escapeHtml(m.level)}<br>
+      ${metaBox}
 
       <hr>
       ${grid}
@@ -509,24 +560,21 @@ function detailHtml(m, selectedTime){
       <hr>
       <b>おすすめ：</b>
       ${bestDay ? `${bestDay.day}（${bestDay.date} / ${bestDay.score}）` : "判定不可"}
-      ${reason}
     </div>
   `;
 }
 
-/* ===== 別画面（オーバーレイ）制御 ===== */
+/* ===== 詳細オーバーレイ制御 ===== */
 const detailOverlay = document.getElementById("detailOverlay");
 const detailTitle = document.getElementById("detailTitle");
 const detailBody = document.getElementById("detailBody");
 const detailClose = document.getElementById("detailClose");
-
 let currentDetail = null; // { mountain, marker }
 
 function openDetail(m, marker){
   currentDetail = { mountain: m, marker };
   detailTitle.textContent = m.name;
   detailBody.innerHTML = detailHtml(m, getSelectedTime());
-
   detailOverlay.classList.add("show");
   detailOverlay.setAttribute("aria-hidden","false");
   document.body.style.overflow = "hidden";
@@ -538,18 +586,15 @@ function closeDetail(){
   document.body.style.overflow = "";
   currentDetail = null;
 }
-
 detailClose.onclick = closeDetail;
-// 背景クリックで閉じる（パネル外）
 detailOverlay.addEventListener("click", (e) => {
   if (e.target === detailOverlay) closeDetail();
 });
-// ESCで閉じる（PC）
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && detailOverlay.classList.contains("show")) closeDetail();
 });
 
-/* ===== ③：スマホの山リスト「隠す/出す」 ===== */
+/* ===== スマホの山リスト：隠す/出す ===== */
 const listEl = document.getElementById("list");
 const listHeaderEl = document.getElementById("listHeader");
 const listBodyEl = document.getElementById("listBody");
@@ -562,7 +607,6 @@ function isMobile(){
 let listCollapsed = false;
 function setListCollapsed(collapsed){
   listCollapsed = collapsed;
-
   if (isMobile()){
     listEl.classList.toggle("is-collapsed", collapsed);
     listTabEl.classList.toggle("hidden", !collapsed);
@@ -573,13 +617,10 @@ function setListCollapsed(collapsed){
 }
 
 function initMobileListGestures(){
-  // ヘッダタップで隠す
   listHeaderEl.addEventListener("click", () => {
     if (!isMobile()) return;
     setListCollapsed(true);
   });
-
-  // タブで表示
   listTabEl.addEventListener("click", () => {
     if (!isMobile()) return;
     setListCollapsed(false);
@@ -603,8 +644,7 @@ function initMobileListGestures(){
     const y = e.touches[0].clientY;
     const dy = y - startY;
     lastDy = dy;
-
-    if (dy <= 0) return; // 上方向は無視
+    if (dy <= 0) return;
     listEl.style.transition = "none";
     listEl.style.transform = `translateY(${Math.min(dy, 260)}px)`;
   }, { passive:true });
@@ -612,10 +652,8 @@ function initMobileListGestures(){
   listHeaderEl.addEventListener("touchend", () => {
     if (!dragging) return;
     dragging = false;
-
     listEl.style.transition = "";
     listEl.style.transform = "";
-
     if (lastDy > 120){
       setListCollapsed(true);
     }
@@ -626,7 +664,7 @@ function initMobileListGestures(){
   });
 }
 
-/* ===== リスト描画（スマホはlistBody、PCはlist直） ===== */
+/* ===== リスト描画 ===== */
 function drawList(items, day){
   const target = isMobile() ? listBodyEl : listEl;
 
@@ -637,10 +675,13 @@ function drawList(items, day){
   }
 
   items.forEach(({ m, best, marker }) => {
-    const meta = m.weather?._meta;
-    const isApiSrc = meta?.source === "api";
+    const meta = m.weather?._meta || {};
+    const isApiSrc = meta.source === "api";
     const badgeClass = isApiSrc ? "badge-api" : "badge-dummy";
     const srcText = isApiSrc ? "API" : "DUMMY";
+    const fetched = fmtJpDateTime(meta.fetchedAt);
+    const ago = timeAgo(meta.fetchedAt);
+    const warn = (!isApiSrc && meta.reason) ? ` / 失敗:${escapeHtml(meta.reason)}` : "";
 
     const div = document.createElement("div");
     div.className = "list-item";
@@ -649,12 +690,13 @@ function drawList(items, day){
       ${best?.score==="A" ? "<span class='star'>★</span>" : ""}
       <span class="badge ${badgeClass}">${srcText}</span><br>
       標高:${m.elev}m / ${escapeHtml(m.level)}<br>
-      ベスト:${best ? `${best.time}（${best.score}）` : "-"}
+      ベスト:${best ? `${best.time}（${best.score}）` : "-"}<br>
+      <small>取得:${fetched}（${ago}）${warn}</small>
     `;
     div.onclick = () => {
       if (isMobile()) setListCollapsed(true);
       map.setView([m.lat, m.lng], 11);
-      openDetail(m, marker); // ✅ 別画面
+      openDetail(m, marker);
     };
     target.appendChild(div);
   });
@@ -663,7 +705,7 @@ function drawList(items, day){
 /* ===== 重要：マーカーは作り直さない ===== */
 const markerEntries = []; // { m, marker, shown }
 
-/* ===== 画面状態（フィルタ取得） ===== */
+/* ===== フィルタ状態 ===== */
 function getState(){
   const day = Number(document.getElementById("day").value);
   const time = getSelectedTime();
@@ -681,7 +723,7 @@ function getState(){
   return { day, time, dateKey, goodOnly, scores, levels };
 }
 
-/* ===== 表示更新（別画面もリアルタイム更新） ===== */
+/* ===== 更新 ===== */
 function updateView(){
   const { day, time, dateKey, goodOnly, scores, levels } = getState();
   const items = [];
@@ -702,17 +744,15 @@ function updateView(){
         markerLayer.addLayer(marker);
         entry.shown = true;
       }
-      marker.setIcon(icons[score]); // ✅ ポップアップじゃないので常時更新OK
+      marker.setIcon(icons[score]);
 
       const best = getBestTime(m.weather, dateKey);
       items.push({ m, best, marker });
-
     } else {
       if (entry.shown){
         markerLayer.removeLayer(marker);
         entry.shown = false;
       }
-      // フィルタで消えた山が詳細表示中なら閉じる
       if (currentDetail?.mountain === m){
         closeDetail();
       }
@@ -721,7 +761,7 @@ function updateView(){
 
   drawList(items, day);
 
-  // 詳細表示中なら内容を更新（スライダー/日付変更で反映）
+  // 詳細表示中なら内容も更新（スライダー/日付変更を反映）
   if (currentDetail?.mountain){
     detailTitle.textContent = currentDetail.mountain.name;
     detailBody.innerHTML = detailHtml(currentDetail.mountain, time);
@@ -732,6 +772,7 @@ function updateView(){
 
 /* ===== 初期化 ===== */
 async function init(){
+  // 予報取得（weather.js側で localStorage キャッシュ）
   await Promise.all(mountains.map(async m => {
     if (!m.weather || Object.keys(m.weather).length === 0) {
       m.weather = await generateWeatherScore(m.name, m.lat, m.lng);
@@ -740,13 +781,10 @@ async function init(){
 
   for (const m of mountains){
     const marker = L.marker([m.lat, m.lng], { icon: icons["C"] });
-
-    // ✅ ピンタップは“別画面”
     marker.on("click", () => {
       map.setView([m.lat, m.lng], Math.max(map.getZoom(), 10));
       openDetail(m, marker);
     });
-
     markerEntries.push({ m, marker, shown:false });
   }
 
@@ -755,7 +793,7 @@ async function init(){
 
   initMobileListGestures();
 
-  // 初期表示（B）：スマホは最初から隠す（タブのみ）
+  // ✅ スマホ初期（B）：隠してタブだけ
   setListCollapsed(isMobile() ? true : false);
 
   timeLabel.textContent = timeLabels[slider.value];
@@ -764,6 +802,5 @@ async function init(){
 
 init();
 </script>
-
 </body>
 </html>
