@@ -324,10 +324,45 @@ import { generateWeatherScore } from "./weather.js";
 /* ===== 時間帯 ===== */
 const timeSlots = ["06:00","08:00","10:00","12:00","14:00","16:00"];
 const timeLabels = ["06–08","08–10","10–12","12–14","14–16","16–18"];
+
 const slider = document.getElementById("timeSlider");
 const timeLabel = document.getElementById("timeLabel");
+const daySelect = document.getElementById("day");
+
+function nearestTimeSlotIndexNow(){
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+
+  // 各枠の「開始時刻」を分に変換（06:00,08:00...）
+  const starts = timeSlots.map(s => {
+    const h = Number(s.slice(0,2));
+    return h * 60;
+  });
+
+  // 一番近い開始時刻を選ぶ（同点は早い方）
+  let bestIdx = 0;
+  let bestDiff = Infinity;
+  starts.forEach((min, idx) => {
+    const diff = Math.abs(nowMin - min);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestIdx = idx;
+    }
+  });
+
+  // ただし、早朝/夜で不自然にならないように端を保護
+  if (nowMin < starts[0]) return 0;                     // 06:00より前 → 06:00
+  if (nowMin > starts[starts.length - 1] + 120) return starts.length - 1; // 18:00以降想定 → 16:00
+  return bestIdx;
+}
+
+function setSliderIndex(idx){
+  slider.value = String(idx);
+  timeLabel.textContent = timeLabels[idx];
+}
+
 slider.oninput = () => {
-  timeLabel.textContent = timeLabels[slider.value];
+  timeLabel.textContent = timeLabels[Number(slider.value)];
   updateView();
 };
 const getSelectedTime = () => timeSlots[Number(slider.value)];
@@ -487,7 +522,7 @@ function getBestTime(weather, dateKey){
 
 /* ===== 詳細HTML ===== */
 function detailHtml(m, selectedTime){
-  const day = Number(document.getElementById("day").value);
+  const day = Number(daySelect.value);
   const dateKey = getDateKey(day);
 
   const metaBox = buildMetaBox(m);
@@ -569,7 +604,7 @@ const detailOverlay = document.getElementById("detailOverlay");
 const detailTitle = document.getElementById("detailTitle");
 const detailBody = document.getElementById("detailBody");
 const detailClose = document.getElementById("detailClose");
-let currentDetail = null; // { mountain, marker }
+let currentDetail = null;
 
 function openDetail(m, marker){
   currentDetail = { mountain: m, marker };
@@ -626,7 +661,6 @@ function initMobileListGestures(){
     setListCollapsed(false);
   });
 
-  // 下スワイプで隠す（ヘッダ上だけ：dy>120px）
   let startY = 0;
   let lastDy = 0;
   let dragging = false;
@@ -703,11 +737,11 @@ function drawList(items, day){
 }
 
 /* ===== 重要：マーカーは作り直さない ===== */
-const markerEntries = []; // { m, marker, shown }
+const markerEntries = [];
 
 /* ===== フィルタ状態 ===== */
 function getState(){
-  const day = Number(document.getElementById("day").value);
+  const day = Number(daySelect.value);
   const time = getSelectedTime();
   const dateKey = getDateKey(day);
   const goodOnly = document.getElementById("goodOnly").checked;
@@ -771,7 +805,14 @@ function updateView(){
 
 /* ===== 初期化 ===== */
 async function init(){
-  // ✅ ここが変更点：m.level を渡す（難易度補正が効く）
+  // ✅ 要望：日付が「今日」の場合、時間帯を現在時刻に最も近い枠にする
+  if (Number(daySelect.value) === 0) {
+    setSliderIndex(nearestTimeSlotIndexNow());
+  } else {
+    setSliderIndex(Number(slider.value));
+  }
+
+  // 難易度補正が効くよう m.level を渡す
   await Promise.all(mountains.map(async m => {
     if (!m.weather || Object.keys(m.weather).length === 0) {
       m.weather = await generateWeatherScore(m.name, m.lat, m.lng, m.level);
@@ -795,7 +836,6 @@ async function init(){
   // スマホ初期：隠してタブだけ（B）
   setListCollapsed(isMobile() ? true : false);
 
-  timeLabel.textContent = timeLabels[slider.value];
   updateView();
 }
 
