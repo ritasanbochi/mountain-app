@@ -332,7 +332,6 @@ const daySelect = document.getElementById("day");
 function nearestTimeSlotIndexNow(){
   const now = new Date();
   const nowMin = now.getHours() * 60 + now.getMinutes();
-
   const starts = timeSlots.map(s => Number(s.slice(0,2)) * 60);
 
   let bestIdx = 0;
@@ -361,22 +360,27 @@ slider.oninput = () => {
 };
 const getSelectedTime = () => timeSlots[Number(slider.value)];
 
-/* ✅ 追加：日付を今日に戻した瞬間も、最寄り枠へ */
+/* ✅ 日付を今日に戻した瞬間も最寄り枠へ */
 daySelect.addEventListener("change", () => {
   if (Number(daySelect.value) === 0) {
     setSliderIndex(nearestTimeSlotIndexNow());
-    // slider.oninput を呼ばず、ここで一回だけ更新
     updateView();
   } else {
     updateView();
   }
 });
 
-/* ===== 日付キー ===== */
+/* ===== 日付キー（★修正：UTCではなくローカルJSTで作る） ===== */
+function pad2(n){ return String(n).padStart(2, "0"); }
+function formatLocalYMD(d){
+  // d はローカルタイムの Date として扱う
+  return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+}
 function getDateKey(offset){
   const d = new Date();
+  d.setHours(0,0,0,0);       // ローカルの0時に固定
   d.setDate(d.getDate() + offset);
-  return d.toISOString().slice(0, 10);
+  return formatLocalYMD(d);  // ★ toISOString を使わない
 }
 const dayTitles = ["今日","1日後","2日後","3日後"];
 
@@ -830,7 +834,7 @@ async function init(){
     markerEntries.push({ m, marker, shown:false });
   }
 
-  // NOTE: daySelect は上で専用ハンドラを付けているので、ここでは除外
+  // daySelect は専用ハンドラを付けているので除外
   document.querySelectorAll("#control input,#control select")
     .forEach(e => {
       if (e === daySelect) return;
