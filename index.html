@@ -79,7 +79,7 @@ small{ color:#555; }
   font-weight:700;
 }
 
-/* ===== スコア早見表（4日×6枠） ===== */
+/* ===== ② 追加：スコア早見表（4日×6枠） ===== */
 .score-grid{
   width:100%;
   border-collapse:collapse;
@@ -173,9 +173,10 @@ const timeLabel = document.getElementById("timeLabel");
 
 slider.oninput = () => {
   timeLabel.textContent = timeLabels[slider.value];
-  updateView(); // ★再生成せず更新だけ
+  draw();
 };
 const getSelectedTime = () => timeSlots[Number(slider.value)];
+const getSelectedTimeIdx = () => Number(slider.value);
 
 /* ===== 日付キー ===== */
 function getDateKey(offset){
@@ -221,16 +222,8 @@ function fmt(n, digits=1){
   if (!Number.isFinite(v)) return "-";
   return v.toFixed(digits);
 }
-function escapeHtml(str){
-  return String(str)
-    .replaceAll("&","&amp;")
-    .replaceAll("<","&lt;")
-    .replaceAll(">","&gt;")
-    .replaceAll('"',"&quot;")
-    .replaceAll("'","&#39;");
-}
 
-/* ===== スコア早見表（4×6） ===== */
+/* ===== ②：スコア早見表（4×6） ===== */
 function scoreCellClass(score){
   if (score === "A") return "a";
   if (score === "B") return "b";
@@ -283,7 +276,16 @@ function getBestTime(weather, dateKey){
   return best;
 }
 
-/* ===== ポップアップHTML ===== */
+function escapeHtml(str){
+  return String(str)
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#39;");
+}
+
+/* ===== ポップアップHTML：②スコア早見表 + ①根拠付き表 + 今日〜3日後（選択時間） ===== */
 function popupHtml(m, selectedTime){
   const meta = m.weather?._meta;
   const isApi = meta?.source === "api";
@@ -403,11 +405,11 @@ function drawList(items, day){
   });
 }
 
-/* ===== 重要：マーカーは作り直さない ===== */
-const markerEntries = []; // { m, marker, shown }
+/* ===== 描画 ===== */
+function draw(){
+  markerLayer.clearLayers();
+  const items = [];
 
-/* ===== 画面状態（フィルタ取得） ===== */
-function getState(){
   const day = Number(document.getElementById("day").value);
   const time = getSelectedTime();
   const dateKey = getDateKey(day);
@@ -421,81 +423,43 @@ function getState(){
     'input[value="初級"]:checked,input[value="中級"]:checked,input[value="上級"]:checked'
   )].map(e => e.value);
 
-  return { day, time, dateKey, goodOnly, scores, levels };
-}
-
-/* ===== ビュー更新（スライダーでもポップアップ閉じない） ===== */
-function updateView(){
-  const { day, time, dateKey, goodOnly, scores, levels } = getState();
-  const items = [];
-
-  for (const entry of markerEntries){
-    const m = entry.m;
-    const marker = entry.marker;
-
+  for (const m of mountains) {
     const score = m.weather?.[dateKey]?.[time];
+    if (!score) continue;
+    if (!scores.includes(score)) continue;
+    if (!levels.includes(m.level)) continue;
+    if (goodOnly && (score !== "A" || m.level === "上級")) continue;
 
-    const pass =
-      !!score &&
-      scores.includes(score) &&
-      levels.includes(m.level) &&
-      !(goodOnly && (score !== "A" || m.level === "上級"));
+    const best = getBestTime(m.weather, dateKey);
 
-    if (pass){
-      // 表示ON（未表示ならlayerに追加）
-      if (!entry.shown){
-        markerLayer.addLayer(marker);
-        entry.shown = true;
-      }
-      // アイコン更新
-      marker.setIcon(icons[score]);
-      // ポップアップ内容を更新（開いていればリアルタイムに反映）
-      const newHtml = popupHtml(m, time);
-      const pop = marker.getPopup();
-      if (pop) pop.setContent(newHtml);
-      else marker.bindPopup(newHtml);
+    const marker = L.marker([m.lat, m.lng], { icon: icons[score] })
+      .bindPopup(popupHtml(m, time))
+      .addTo(markerLayer);
 
-      const best = getBestTime(m.weather, dateKey);
-      items.push({ m, best, marker });
-    } else {
-      // 表示OFF（表示中ならlayerから外す）
-      if (entry.shown){
-        markerLayer.removeLayer(marker);
-        entry.shown = false;
-      }
-    }
+    items.push({ m, best, marker });
   }
 
   drawList(items, day);
-  setTimeout(() => map.invalidateSize(), 100);
+  setTimeout(() => map.invalidateSize(), 200);
 }
 
 /* ===== 初期化 ===== */
 async function init(){
-  // 天気生成
   await Promise.all(mountains.map(async m => {
     if (!m.weather || Object.keys(m.weather).length === 0) {
       m.weather = await generateWeatherScore(m.name, m.lat, m.lng);
     }
   }));
 
-  // マーカーを一度だけ作成して保持
-  for (const m of mountains){
-    const marker = L.marker([m.lat, m.lng], { icon: icons["C"] }); // 仮
-    marker.bindPopup(popupHtml(m, getSelectedTime()));
-    markerEntries.push({ m, marker, shown:false });
-  }
-
-  // 変更イベント
-  document.querySelectorAll("#control input,#control select")
-    .forEach(e => e.addEventListener("change", updateView));
-
-  // 初回描画
   const apiCount = mountains.filter(m => m.weather?._meta?.source === "api").length;
   const dummyCount = mountains.length - apiCount;
+  console.log("weather meta sample", mountains[0].weather?._meta);
   console.log(`weather sources: api=${apiCount}, dummy=${dummyCount}`);
 
-  updateView();
+  document.querySelectorAll("#control input,#control select")
+    .forEach(e => e.addEventListener("change", draw));
+
+  draw();
 }
 
 init();
