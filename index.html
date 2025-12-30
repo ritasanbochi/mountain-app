@@ -171,9 +171,12 @@ const timeLabels = ["06–08","08–10","10–12","12–14","14–16","16–18"]
 const slider = document.getElementById("timeSlider");
 const timeLabel = document.getElementById("timeLabel");
 
+/* ★今開いているポップアップを保持 */
+let openedMarker = null;
+
 slider.oninput = () => {
   timeLabel.textContent = timeLabels[slider.value];
-  updateView(); // ★再生成せず更新だけ
+  updateView(); // 再生成せず更新
 };
 const getSelectedTime = () => timeSlots[Number(slider.value)];
 
@@ -294,10 +297,8 @@ function popupHtml(m, selectedTime){
   const day = Number(document.getElementById("day").value);
   const dateKey = getDateKey(day);
 
-  // ②スコア早見表
   const grid = buildScoreGridHtml(m, day, selectedTime);
 
-  // ①選択日の「時間帯別」表（根拠付き）
   const rows = timeSlots.map((t, idx) => {
     const s = m.weather?.[dateKey]?.[t] ?? "-";
     const d = getDetail(m, dateKey, t);
@@ -327,7 +328,6 @@ function popupHtml(m, selectedTime){
     <small>※ DUMMY / データ不足の枠は「-」表示</small>
   `;
 
-  // 今日〜3日後（選択時間帯）の一覧
   const lines = [];
   for (let d = 0; d <= 3; d++) {
     const dk = getDateKey(d);
@@ -341,7 +341,6 @@ function popupHtml(m, selectedTime){
     lines.push(`${dayTitles[d]}（${dk}）：<b>${s}</b> ${extra}`);
   }
 
-  // おすすめ日（この時間帯で最良）
   let bestDay = null;
   for (let d = 0; d <= 3; d++) {
     const dk = getDateKey(d);
@@ -403,7 +402,7 @@ function drawList(items, day){
   });
 }
 
-/* ===== 重要：マーカーは作り直さない ===== */
+/* ===== マーカーは作り直さない ===== */
 const markerEntries = []; // { m, marker, shown }
 
 /* ===== 画面状態（フィルタ取得） ===== */
@@ -424,17 +423,19 @@ function getState(){
   return { day, time, dateKey, goodOnly, scores, levels };
 }
 
-/* ===== ビュー更新（スライダーでもポップアップ閉じない） ===== */
+/* ===== ビュー更新（ポップアップ維持） ===== */
 function updateView(){
   const { day, time, dateKey, goodOnly, scores, levels } = getState();
   const items = [];
+
+  // 開いているマーカーを、更新後に復帰させるため保持
+  const reopenTarget = openedMarker;
 
   for (const entry of markerEntries){
     const m = entry.m;
     const marker = entry.marker;
 
     const score = m.weather?.[dateKey]?.[time];
-
     const pass =
       !!score &&
       scores.includes(score) &&
@@ -442,14 +443,18 @@ function updateView(){
       !(goodOnly && (score !== "A" || m.level === "上級"));
 
     if (pass){
-      // 表示ON（未表示ならlayerに追加）
       if (!entry.shown){
         markerLayer.addLayer(marker);
         entry.shown = true;
       }
-      // アイコン更新
-      marker.setIcon(icons[score]);
-      // ポップアップ内容を更新（開いていればリアルタイムに反映）
+
+      // ★ポップアップ開いてる間は setIcon しない（閉じる原因になりがち）
+      const isOpenNow = marker.isPopupOpen && marker.isPopupOpen();
+      if (!isOpenNow) {
+        marker.setIcon(icons[score]);
+      }
+
+      // ポップアップ内容更新（開いていれば即反映）
       const newHtml = popupHtml(m, time);
       const pop = marker.getPopup();
       if (pop) pop.setContent(newHtml);
@@ -458,7 +463,9 @@ function updateView(){
       const best = getBestTime(m.weather, dateKey);
       items.push({ m, best, marker });
     } else {
-      // 表示OFF（表示中ならlayerから外す）
+      // フィルタで消える場合：開いてたやつなら保持を解除
+      if (reopenTarget === marker) openedMarker = null;
+
       if (entry.shown){
         markerLayer.removeLayer(marker);
         entry.shown = false;
@@ -467,30 +474,42 @@ function updateView(){
   }
 
   drawList(items, day);
+
+  // ★更新で閉じた場合でも、同じマーカーを即 reopen
+  if (reopenTarget && markerLayer.hasLayer(reopenTarget)) {
+    // content更新が先に入るように、ほんの少し遅延
+    setTimeout(() => {
+      if (!reopenTarget.isPopupOpen()) reopenTarget.openPopup();
+    }, 0);
+  }
+
   setTimeout(() => map.invalidateSize(), 100);
 }
 
 /* ===== 初期化 ===== */
 async function init(){
-  // 天気生成
   await Promise.all(mountains.map(async m => {
     if (!m.weather || Object.keys(m.weather).length === 0) {
       m.weather = await generateWeatherScore(m.name, m.lat, m.lng);
     }
   }));
 
-  // マーカーを一度だけ作成して保持
   for (const m of mountains){
     const marker = L.marker([m.lat, m.lng], { icon: icons["C"] }); // 仮
     marker.bindPopup(popupHtml(m, getSelectedTime()));
+
+    // ★開いてるポップアップを追跡
+    marker.on("popupopen", () => { openedMarker = marker; });
+    marker.on("popupclose", () => {
+      if (openedMarker === marker) openedMarker = null;
+    });
+
     markerEntries.push({ m, marker, shown:false });
   }
 
-  // 変更イベント
   document.querySelectorAll("#control input,#control select")
     .forEach(e => e.addEventListener("change", updateView));
 
-  // 初回描画
   const apiCount = mountains.filter(m => m.weather?._meta?.source === "api").length;
   const dummyCount = mountains.length - apiCount;
   console.log(`weather sources: api=${apiCount}, dummy=${dummyCount}`);
