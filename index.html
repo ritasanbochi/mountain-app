@@ -370,19 +370,40 @@ daySelect.addEventListener("change", () => {
   }
 });
 
-/* ===== 日付キー（★修正：UTCではなくローカルJSTで作る） ===== */
+/* ===== 日付キー（ローカルでYYYY-MM-DD） ===== */
 function pad2(n){ return String(n).padStart(2, "0"); }
 function formatLocalYMD(d){
-  // d はローカルタイムの Date として扱う
   return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
 }
 function getDateKey(offset){
   const d = new Date();
-  d.setHours(0,0,0,0);       // ローカルの0時に固定
+  d.setHours(0,0,0,0);
   d.setDate(d.getDate() + offset);
-  return formatLocalYMD(d);  // ★ toISOString を使わない
+  return formatLocalYMD(d);
 }
-const dayTitles = ["今日","1日後","2日後","3日後"];
+
+/* ===== 表示用：日付＋曜日＋相対 ===== */
+const WDS = ["日","月","火","水","木","金","土"];
+function getDateObj(offset){
+  const d = new Date();
+  d.setHours(0,0,0,0);
+  d.setDate(d.getDate() + offset);
+  return d;
+}
+function dayLabel(offset){
+  const d = getDateObj(offset);
+  const mm = pad2(d.getMonth()+1);
+  const dd = pad2(d.getDate());
+  const wd = WDS[d.getDay()];
+  const rel = offset === 0 ? "今日" : `${offset}日後`;
+  return `${mm}/${dd}(${wd}) ${rel}`;
+}
+function initDaySelectLabels(){
+  [...daySelect.options].forEach(opt => {
+    const off = Number(opt.value);
+    opt.textContent = dayLabel(off);
+  });
+}
 
 /* ===== 地図 ===== */
 const map = L.map("map").setView([36.5, 138], 5);
@@ -490,7 +511,7 @@ function buildScoreGridHtml(m, selDay, selTime){
   const head = `
     <thead>
       <tr>
-        <th style="width:14%"></th>
+        <th style="width:18%"></th>
         ${timeLabels.map(l => `<th>${l}</th>`).join("")}
       </tr>
     </thead>
@@ -504,7 +525,7 @@ function buildScoreGridHtml(m, selDay, selTime){
       const sel = (d === selDay && t === selTime) ? "sel" : "";
       return `<td class="${base} ${sel}">${s ?? "-"}</td>`;
     }).join("");
-    bodyRows.push(`<tr><th>${dayTitles[d]}</th>${tds}</tr>`);
+    bodyRows.push(`<tr><th>${escapeHtml(dayLabel(d))}</th>${tds}</tr>`);
   }
   return `
     <b>スコア早見表（今日〜3日後 × 全時間帯）</b><br>
@@ -554,7 +575,7 @@ function detailHtml(m, selectedTime){
   }).join("");
 
   const dayTable = `
-    <b>${dayTitles[day]}（${dateKey}）時間帯別</b><br>
+    <b>${escapeHtml(dayLabel(day))}（${dateKey}）時間帯別</b><br>
     <table class="wx-table">
       <thead>
         <tr>
@@ -574,7 +595,7 @@ function detailHtml(m, selectedTime){
     const extra = di
       ? `（降水 ${fmt(di.precipitation,1)}mm / 風 ${fmt(di.windspeed,1)}m/s / 突風 ${fmt(di.gust,1)}m/s / 気温 ${fmt(di.temp,1)}℃）`
       : "";
-    lines.push(`${dayTitles[d]}（${dk}）：<b>${s ?? "-"}</b> ${extra}`);
+    lines.push(`${escapeHtml(dayLabel(d))}：<b>${s ?? "-"}</b> ${extra}`);
   }
 
   let bestDay = null;
@@ -582,7 +603,7 @@ function detailHtml(m, selectedTime){
     const dk = getDateKey(d);
     const s = m.weather?.[dk]?.[selectedTime];
     if (!s) continue;
-    if (!bestDay || scorePriority[s] > scorePriority[bestDay.score]) bestDay = { date: dk, day: dayTitles[d], score: s };
+    if (!bestDay || scorePriority[s] > scorePriority[bestDay.score]) bestDay = { off:d, date: dk, score: s };
   }
 
   return `
@@ -603,7 +624,7 @@ function detailHtml(m, selectedTime){
 
       <hr>
       <b>おすすめ：</b>
-      ${bestDay ? `${bestDay.day}（${bestDay.date} / ${bestDay.score}）` : "判定不可"}
+      ${bestDay ? `${escapeHtml(dayLabel(bestDay.off))}（${bestDay.date} / ${bestDay.score}）` : "判定不可"}
     </div>
   `;
 }
@@ -712,9 +733,9 @@ function drawList(items, day){
   const target = isMobile() ? listBodyEl : listEl;
 
   if (isMobile()){
-    target.innerHTML = `<div style="padding:8px 10px; font-weight:700;">${dayTitles[day]}に登れる山</div>`;
+    target.innerHTML = `<div style="padding:8px 10px; font-weight:700;">${escapeHtml(dayLabel(day))} に登れる山</div>`;
   } else {
-    target.innerHTML = `<b>${dayTitles[day]}に登れる山</b><br>`;
+    target.innerHTML = `<b>${escapeHtml(dayLabel(day))} に登れる山</b><br>`;
   }
 
   items.forEach(({ m, best, marker }) => {
@@ -814,11 +835,12 @@ function updateView(){
 
 /* ===== 初期化 ===== */
 async function init(){
+  initDaySelectLabels();
+
   // 初期：今日なら最寄り枠
   if (Number(daySelect.value) === 0) setSliderIndex(nearestTimeSlotIndexNow());
   else setSliderIndex(Number(slider.value));
 
-  // 難易度補正が効くよう m.level を渡す
   await Promise.all(mountains.map(async m => {
     if (!m.weather || Object.keys(m.weather).length === 0) {
       m.weather = await generateWeatherScore(m.name, m.lat, m.lng, m.level);

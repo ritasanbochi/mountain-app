@@ -1,17 +1,18 @@
-// weather.js (tenkura-like, precip-primary, v5)
+// weather.js (tenkura-like, precip-primary, v6)
 //
 // 方針：
 // - スコアは「降水（天気）」を主軸に決める
 // - 風・突風・気温は “危険域/極端” のときだけ補助的に格下げ
 // - てんくら寄せ：Cを出しにくくする（＝危険域は明確にC、それ以外はB止まりが多い）
 //
-// index.html 側は generateWeatherScore(name, lat, lng, level) を呼ぶ前提。
+// v6: 風の評価を「少しだけ」甘く（平均風が強い山がある前提）
+//     + キャッシュprefix更新
 
 const OPEN_METEO_ENDPOINT = "https://api.open-meteo.com/v1/forecast";
 const TIMEZONE = "Asia/Tokyo";
 
 // キャッシュ（localStorage）
-const CACHE_PREFIX = "mount_weather_v5_"; // ★ v5: 旧キャッシュ無効化
+const CACHE_PREFIX = "mount_weather_v6_"; // ★ v6: 旧キャッシュ無効化
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1時間
 
 // UIが使う時間帯（index.htmlと合わせる）
@@ -37,8 +38,6 @@ function worse(a, b){
 
 /**
  * てんくら寄せ（降水主軸）
- * - 降水がメイン
- * - 風/突風/低温は “危険域” でのみ格下げ
  *
  * ▼降水(mm/h)で基本スコア
  *   A: <= 1.0
@@ -47,44 +46,39 @@ function worse(a, b){
  *
  * ▼風(m/s)・突風(m/s)で補助（危険域は明確に）
  *   風 or 突風が危険域 → C
- *     wind >= 20  または gust >= 30
  *   注意域 → 最大B（AならBに落とす程度）
- *     wind >= 15  または gust >= 23
  *
  * ▼気温(℃)で補助（極端な寒さだけ）
- *   temp <= -12 → C
- *   temp <= -6  → 最大B
- *
- * 難易度補正（最小限）
- *   初級: 風・突風の閾値を少し厳しめ、低温も少し厳しめ
- *   上級: ほぼ据え置き（少しだけ緩め）
  */
 function thresholdsByLevel(level){
+  // ★ 風を少し甘く（基準）
   const base = {
     // precip
     rainA: 1.0, rainB: 4.0,
 
-    // wind/gust (support)
-    windWarn: 15, windDanger: 20,
-    gustWarn: 23, gustDanger: 30,
+    // wind/gust (support)  ← v6で緩和
+    windWarn: 16, windDanger: 22,
+    gustWarn: 25, gustDanger: 33,
 
     // temp (support)
     tempWarn: -6, tempDanger: -12
   };
 
   if (level === "初級"){
+    // 初級も同方向で緩和（ただし基準よりは少し厳しめ）
     return {
       rainA: 0.8, rainB: 3.5,
-      windWarn: 14, windDanger: 18,
-      gustWarn: 21, gustDanger: 28,
+      windWarn: 15, windDanger: 20,
+      gustWarn: 23, gustDanger: 30,
       tempWarn: -4, tempDanger: -10
     };
   }
   if (level === "上級"){
+    // 上級はさらに少し緩め
     return {
       rainA: 1.2, rainB: 4.5,
-      windWarn: 16, windDanger: 22,
-      gustWarn: 25, gustDanger: 32,
+      windWarn: 17, windDanger: 24,
+      gustWarn: 27, gustDanger: 35,
       tempWarn: -7, tempDanger: -13
     };
   }
@@ -113,10 +107,7 @@ function applyWindSupport(score, wind, gust, th){
 function applyTempSupport(score, temp, th){
   if (temp === null) return score;
 
-  // 極端な低温はC
   if (temp <= th.tempDanger) return "C";
-
-  // 低温注意は最大B（A→Bに落とす）
   if (temp <= th.tempWarn && score === "A") return "B";
 
   return score;
@@ -130,13 +121,8 @@ function scoreWithComponents(level, metrics){
   const g = metrics.gust;
   const t = metrics.temp;
 
-  // ① 基本は降水で決める
   let s = baseScoreByPrecip(p, th);
-
-  // ② 風/突風は補助（危険域でC、注意域でA→B）
   s = applyWindSupport(s, w, g, th);
-
-  // ③ 気温は補助（極端ならC、注意ならA→B）
   s = applyTempSupport(s, t, th);
 
   return {
@@ -150,13 +136,7 @@ function scoreWithComponents(level, metrics){
   };
 }
 
-/** ===== Open-Meteo 取得 =====
- * hourly:
- *  - precipitation (mm)
- *  - wind_speed_10m (m/s)
- *  - wind_gusts_10m (m/s)
- *  - temperature_2m (°C)
- */
+/** ===== Open-Meteo 取得 ===== */
 async function fetchOpenMeteo(lat, lng){
   const params = new URLSearchParams({
     latitude: String(lat),
@@ -193,7 +173,7 @@ function buildFromHourly(name, lat, lng, level, hourly){
 
   for (let d = 0; d < 4; d++){
     const dt = new Date();
-    dt.setHours(0,0,0,0); // ローカル0時基準
+    dt.setHours(0,0,0,0);
     dt.setDate(dt.getDate() + d);
     const dk = dateKeyLocal(dt);
 
@@ -202,7 +182,6 @@ function buildFromHourly(name, lat, lng, level, hourly){
 
     for (const slot of TIME_SLOTS){
       const hour = slot.slice(0,2);
-      // Open-Meteo timezone=Asia/Tokyo の hourly.time は "YYYY-MM-DDTHH:00" のはず
       const wantIso = `${dk}T${hour}:00`;
 
       const m = pickAtHour(hourly, wantIso);
@@ -260,9 +239,8 @@ function dummyWeather(name, lat, lng, level, reason){
     details[dk] = {};
 
     for (const slot of TIME_SLOTS){
-      // 「厳しすぎ」回避：ダミーも極端にしない
-      const precipitation = clamp(rand() * 5.5, 0, 8);     // 0〜8mm/h
-      const windspeed     = clamp(rand() * 16, 0, 24);     // 0〜24m/s
+      const precipitation = clamp(rand() * 5.5, 0, 8);
+      const windspeed     = clamp(rand() * 16, 0, 24);
       const gust          = clamp(windspeed + rand()*10, 0, 36);
       const temp          = clamp((rand() * 20) - 3, -15, 25);
 
