@@ -59,6 +59,26 @@ body { margin:0; font-family: system-ui, -apple-system, BlinkMacSystemFont, sans
 hr{ border:none; border-top:1px solid #ddd; margin:8px 0; }
 small{ color:#555; }
 
+/* ===== popup内の表 ===== */
+.wx-table{
+  width:100%;
+  border-collapse:collapse;
+  font-size:12px;
+}
+.wx-table th, .wx-table td{
+  border:1px solid #ddd;
+  padding:4px 6px;
+  text-align:center;
+}
+.wx-table th{
+  background:#f7f7f7;
+  font-weight:600;
+}
+.wx-current{
+  background:#eef6ff;
+  font-weight:700;
+}
+
 /* ===== スマホ対応 ===== */
 @media (max-width:768px){
   #list{
@@ -71,6 +91,9 @@ small{ color:#555; }
   .leaflet-popup-content{
     font-size:15px;
     line-height:1.5;
+  }
+  .wx-table{
+    font-size:13px;
   }
 }
 </style>
@@ -189,38 +212,56 @@ function fmt(n, digits=1){
   return v.toFixed(digits);
 }
 
-/* ===== ポップアップHTML：スコア + 根拠 + 今日〜3日後一覧 ===== */
-function popupHtml(m, time){
+/* ===== ポップアップHTML：時間帯別一覧 + 今日〜3日後（選択時間） + おすすめ ===== */
+function popupHtml(m, selectedTime){
   const meta = m.weather?._meta;
   const isApi = meta?.source === "api";
   const badgeClass = isApi ? "badge-api" : "badge-dummy";
   const srcText = isApi ? "API" : "DUMMY";
   const reason = (!isApi && meta?.reason) ? `<br><small>取得失敗: ${escapeHtml(meta.reason)}</small>` : "";
 
-  // 選択日の根拠（表示中の日付）
   const day = Number(document.getElementById("day").value);
   const dateKey = getDateKey(day);
-  const dt = getDetail(m, dateKey, time);
 
-  const evidence = dt ? `
-    <b>根拠（${dayTitles[day]} ${dateKey} ${time}）</b><br>
-    降水：${fmt(dt.precipitation,1)} mm / 風速：${fmt(dt.windspeed,1)} m/s<br>
-    突風：${fmt(dt.gust,1)} m/s / 気温：${fmt(dt.temp,1)} ℃<br>
-    weathercode：${dt.weathercode}
-  ` : `
-    <b>根拠（${dayTitles[day]} ${dateKey} ${time}）</b><br>
-    -（ダミー or 取得データ不足）
+  // 選択日の「時間帯別」表
+  const rows = timeSlots.map((t, idx) => {
+    const s = m.weather?.[dateKey]?.[t] ?? "-";
+    const d = getDetail(m, dateKey, t);
+    const cls = (t === selectedTime) ? "wx-current" : "";
+    return `
+      <tr class="${cls}">
+        <td>${timeLabels[idx]}</td>
+        <td><b>${s}</b></td>
+        <td>${d ? fmt(d.precipitation,1) : "-"}</td>
+        <td>${d ? fmt(d.windspeed,1) : "-"}</td>
+        <td>${d ? fmt(d.gust,1) : "-"}</td>
+        <td>${d ? fmt(d.temp,1) : "-"}</td>
+      </tr>
+    `;
+  }).join("");
+
+  const dayTable = `
+    <b>${dayTitles[day]}（${dateKey}）時間帯別</b><br>
+    <table class="wx-table">
+      <thead>
+        <tr>
+          <th>時間</th><th>判定</th><th>降水(mm)</th><th>風(m/s)</th><th>突風(m/s)</th><th>気温(℃)</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <small>※ DUMMY / データ不足の枠は「-」表示</small>
   `;
 
   // 今日〜3日後（選択時間帯）の一覧：スコア + 可能なら根拠も
   const lines = [];
   for (let d = 0; d <= 3; d++) {
     const dk = getDateKey(d);
-    const s = m.weather?.[dk]?.[time] ?? "-";
-    const di = getDetail(m, dk, time);
+    const s = m.weather?.[dk]?.[selectedTime] ?? "-";
+    const di = getDetail(m, dk, selectedTime);
 
     const extra = di
-      ? `（降水 ${fmt(di.precipitation,1)}mm / 風 ${fmt(di.windspeed,1)}m/s）`
+      ? `（降水 ${fmt(di.precipitation,1)}mm / 風 ${fmt(di.windspeed,1)}m/s / 突風 ${fmt(di.gust,1)}m/s / 気温 ${fmt(di.temp,1)}℃）`
       : "";
 
     lines.push(`${dayTitles[d]}（${dk}）：<b>${s}</b> ${extra}`);
@@ -230,7 +271,7 @@ function popupHtml(m, time){
   let bestDay = null;
   for (let d = 0; d <= 3; d++) {
     const dk = getDateKey(d);
-    const s = m.weather?.[dk]?.[time];
+    const s = m.weather?.[dk]?.[selectedTime];
     if (!s) continue;
     if (!bestDay || scorePriority[s] > scorePriority[bestDay.score]) bestDay = { date: dk, day: dayTitles[d], score: s };
   }
@@ -243,10 +284,10 @@ function popupHtml(m, time){
       難易度：${escapeHtml(m.level)}<br>
 
       <hr>
-      ${evidence}
+      ${dayTable}
 
       <hr>
-      <b>${time} の天気（今日〜3日後）</b><br>
+      <b>${selectedTime} の天気（今日〜3日後）</b><br>
       ${lines.join("<br>")}
 
       <hr>
@@ -334,14 +375,12 @@ function draw(){
 
 /* ===== 初期化 ===== */
 async function init(){
-  // まず天気生成（API or dummy）
   await Promise.all(mountains.map(async m => {
     if (!m.weather || Object.keys(m.weather).length === 0) {
       m.weather = await generateWeatherScore(m.name, m.lat, m.lng);
     }
   }));
 
-  // ここで “APIが混じっているか” を確認できるログ
   const apiCount = mountains.filter(m => m.weather?._meta?.source === "api").length;
   const dummyCount = mountains.length - apiCount;
   console.log("weather meta sample", mountains[0].weather?._meta);
