@@ -26,7 +26,7 @@ body { margin:0; font-family: system-ui, -apple-system, BlinkMacSystemFont, sans
 #container{ height:calc(100vh - 120px); position:relative; }
 #map{ height:100%; width:100%; }
 
-/* ===== リスト ===== */
+/* ===== リスト（PC） ===== */
 #list{
   position:absolute;
   top:0; right:0;
@@ -105,64 +105,101 @@ small{ color:#555; }
 .score-grid .b{ background:#fff7db; }
 .score-grid .c{ background:#ffe7e7; }
 
-/* ===== スマホ対応（リストは下に） ===== */
+/* ===== ③：スマホ用「ボトムシート」UI ===== */
+#listHeader{
+  display:none; /* PCでは出さない */
+}
+
+#listTab{
+  display:none; /* PCでは出さない */
+}
+
+/* ===== スマホ対応 ===== */
 @media (max-width:768px){
+  /* スマホはボトムシート化（PCの右固定は維持） */
   #list{
-    width:100%;
-    height:45%;
+    position:fixed;
+    left:0; right:0;
     bottom:0; top:auto;
+    width:100%;
+    height:45vh;
     border-left:none;
     border-top:1px solid #ccc;
+    border-radius:14px 14px 0 0;
+    box-shadow: 0 -6px 18px rgba(0,0,0,0.08);
+    overflow:hidden; /* ヘッダ＋中身を分ける */
+    z-index:2000;
+
+    transform: translateY(0);
+    transition: transform 220ms ease;
+    touch-action: pan-y;
+    background:#fff;
   }
+
+  /* 隠れる（下へスライド） */
+  #list.is-collapsed{
+    transform: translateY(100%);
+  }
+
+  /* ヘッダ（掴み・スワイプ領域） */
+  #listHeader{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    padding:10px 12px;
+    background:#fff;
+    border-bottom:1px solid #eee;
+  }
+  #listHeader .title{
+    font-weight:700;
+    font-size:14px;
+  }
+  #listHeader .grip{
+    width:42px;
+    height:5px;
+    border-radius:999px;
+    background:#d8d8d8;
+    margin:0 10px;
+  }
+  #listHeader .hint{
+    font-size:12px;
+    color:#666;
+    white-space:nowrap;
+  }
+
+  /* リスト中身はスクロール */
+  #listBody{
+    height:calc(45vh - 48px);
+    overflow:auto;
+    -webkit-overflow-scrolling:touch;
+  }
+
+  /* 左下タブ（リストを出す） */
+  #listTab{
+    display:block;
+    position:fixed;
+    left:12px;
+    bottom:12px;
+    z-index:2500;
+    padding:10px 12px;
+    border-radius:999px;
+    border:1px solid #cfcfcf;
+    background:#fff;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+    font-size:13px;
+  }
+  #listTab.hidden{
+    display:none;
+  }
+
   .leaflet-popup-content{
     font-size:15px;
     line-height:1.5;
+    max-width:92vw;
   }
   .wx-table{ font-size:13px; }
   .score-grid{ font-size:13px; }
-}
-
-/* ===== スマホ：詳細を“新しい画面”で出す（オーバーレイ） ===== */
-#mobileDetail{
-  position:fixed;
-  inset:0;
-  background:#fff;
-  z-index:9999;
-  display:none;
-  flex-direction:column;
-}
-#mobileDetail.show{ display:flex; }
-
-#mobileDetailHeader{
-  position:sticky;
-  top:0;
-  background:#fff;
-  border-bottom:1px solid #ddd;
-  padding:10px 12px;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:10px;
-}
-#mobileDetailHeader b{
-  font-size:16px;
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap;
-  max-width:78%;
-}
-#mobileDetailClose{
-  appearance:none;
-  border:1px solid #ccc;
-  background:#f7f7f7;
-  padding:6px 10px;
-  border-radius:8px;
-  font-size:14px;
-}
-#mobileDetailBody{
-  padding:12px;
-  overflow:auto;
-  -webkit-overflow-scrolling:touch;
 }
 </style>
 </head>
@@ -196,17 +233,22 @@ small{ color:#555; }
 
 <div id="container">
   <div id="map"></div>
-  <div id="list"></div>
+
+  <!-- ③：スマホではヘッダ＋中身の構造にする（PCではヘッダ非表示で従来通り） -->
+  <div id="list">
+    <div id="listHeader">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div class="grip" aria-hidden="true"></div>
+        <div class="title">山リスト</div>
+      </div>
+      <div class="hint">下へスワイプで隠す</div>
+    </div>
+    <div id="listBody"></div>
+  </div>
 </div>
 
-<!-- スマホ用：詳細の“新しい画面” -->
-<div id="mobileDetail" aria-hidden="true">
-  <div id="mobileDetailHeader">
-    <b id="mobileDetailTitle">山の詳細</b>
-    <button id="mobileDetailClose" type="button">閉じる</button>
-  </div>
-  <div id="mobileDetailBody"></div>
-</div>
+<!-- ③：スマホでリストを再表示するタブ -->
+<button id="listTab" class="hidden" type="button">山リスト</button>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
@@ -223,7 +265,7 @@ const timeLabels = ["06–08","08–10","10–12","12–14","14–16","16–18"]
 const slider = document.getElementById("timeSlider");
 const timeLabel = document.getElementById("timeLabel");
 
-/* ★PC: 今開いているポップアップを保持 */
+/* ★今開いているポップアップを保持 */
 let openedMarker = null;
 
 slider.oninput = () => {
@@ -231,6 +273,7 @@ slider.oninput = () => {
   updateView(); // 再生成せず更新
 };
 const getSelectedTime = () => timeSlots[Number(slider.value)];
+const getSelectedTimeIdx = () => Number(slider.value);
 
 /* ===== 日付キー ===== */
 function getDateKey(offset){
@@ -239,37 +282,6 @@ function getDateKey(offset){
   return d.toISOString().slice(0, 10);
 }
 const dayTitles = ["今日","1日後","2日後","3日後"];
-
-/* ===== モバイル判定 ===== */
-function isMobile(){
-  return window.matchMedia("(max-width: 768px)").matches || (L.Browser && L.Browser.mobile);
-}
-
-/* ===== スマホ詳細（新しい画面） ===== */
-const mobileDetail = document.getElementById("mobileDetail");
-const mobileDetailTitle = document.getElementById("mobileDetailTitle");
-const mobileDetailBody = document.getElementById("mobileDetailBody");
-const mobileDetailClose = document.getElementById("mobileDetailClose");
-
-function openMobileDetail(m){
-  const time = getSelectedTime();
-  mobileDetailTitle.textContent = m.name;
-  mobileDetailBody.innerHTML = popupHtml(m, time);
-  mobileDetail.classList.add("show");
-  mobileDetail.setAttribute("aria-hidden","false");
-  document.body.style.overflow = "hidden";
-}
-function closeMobileDetail(){
-  mobileDetail.classList.remove("show");
-  mobileDetail.setAttribute("aria-hidden","true");
-  mobileDetailBody.innerHTML = "";
-  document.body.style.overflow = "";
-}
-mobileDetailClose.onclick = closeMobileDetail;
-// 背景タップで閉じる（ヘッダ以外）
-mobileDetail.addEventListener("click", (e) => {
-  if (e.target === mobileDetail) closeMobileDetail();
-});
 
 /* ===== 地図 ===== */
 const map = L.map("map").setView([36.5, 138], 5);
@@ -301,7 +313,8 @@ function getDetail(m, dateKey, time){
   const d = m.weather?._details?.[dateKey]?.[time];
   return d || null;
 }
-function fmt(n, digits=0){
+function fmt(n, digits=1){
+  if (n === null || n === undefined) return "-";
   const v = Number(n);
   if (!Number.isFinite(v)) return "-";
   return v.toFixed(digits);
@@ -379,10 +392,8 @@ function popupHtml(m, selectedTime){
   const day = Number(document.getElementById("day").value);
   const dateKey = getDateKey(day);
 
-  // ②スコア早見表
   const grid = buildScoreGridHtml(m, day, selectedTime);
 
-  // ①選択日の「時間帯別」表（根拠付き）
   const rows = timeSlots.map((t, idx) => {
     const s = m.weather?.[dateKey]?.[t] ?? "-";
     const d = getDetail(m, dateKey, t);
@@ -412,7 +423,6 @@ function popupHtml(m, selectedTime){
     <small>※ DUMMY / データ不足の枠は「-」表示</small>
   `;
 
-  // 今日〜3日後（選択時間帯）の一覧
   const lines = [];
   for (let d = 0; d <= 3; d++) {
     const dk = getDateKey(d);
@@ -426,7 +436,6 @@ function popupHtml(m, selectedTime){
     lines.push(`${dayTitles[d]}（${dk}）：<b>${s}</b> ${extra}`);
   }
 
-  // おすすめ日（この時間帯で最良）
   let bestDay = null;
   for (let d = 0; d <= 3; d++) {
     const dk = getDateKey(d);
@@ -460,10 +469,130 @@ function popupHtml(m, selectedTime){
   `;
 }
 
-/* ===== リスト描画 ===== */
+/* ===== ③：スマホの山リスト「隠す/出す」 ===== */
+const listEl = document.getElementById("list");
+const listHeaderEl = document.getElementById("listHeader");
+const listBodyEl = document.getElementById("listBody");
+const listTabEl = document.getElementById("listTab");
+
+function isMobile(){
+  return window.matchMedia && window.matchMedia("(max-width: 768px)").matches;
+}
+
+let listCollapsed = false;
+function setListCollapsed(collapsed){
+  listCollapsed = collapsed;
+
+  if (isMobile()){
+    listEl.classList.toggle("is-collapsed", collapsed);
+    listTabEl.classList.toggle("hidden", !collapsed);
+  } else {
+    listEl.classList.remove("is-collapsed");
+    listTabEl.classList.add("hidden");
+  }
+}
+
+function initMobileListGestures(){
+  // ヘッダタップで隠す
+  listHeaderEl.addEventListener("click", () => {
+    if (!isMobile()) return;
+    setListCollapsed(true);
+  });
+
+  // タブで表示
+  listTabEl.addEventListener("click", () => {
+    if (!isMobile()) return;
+    setListCollapsed(false);
+  });
+
+  // スワイプで隠す（ヘッダ上だけ）
+  let startY = 0;
+  let dragging = false;
+
+  listHeaderEl.addEventListener("touchstart", (e) => {
+    if (!isMobile()) return;
+    if (listCollapsed) return;
+    dragging = true;
+    startY = e.touches[0].clientY;
+  }, { passive:true });
+
+  listHeaderEl.addEventListener("touchmove", (e) => {
+    if (!dragging) return;
+    const y = e.touches[0].clientY;
+    const dy = y - startY;
+    if (dy <= 0) return; // 上方向は無視（拡張操作はタブでOK）
+    // 追従（少しだけ）
+    listEl.style.transition = "none";
+    listEl.style.transform = `translateY(${Math.min(dy, 220)}px)`;
+  }, { passive:true });
+
+  listHeaderEl.addEventListener("touchend", () => {
+    if (!dragging) return;
+    dragging = false;
+
+    // 戻す
+    listEl.style.transition = "";
+    listEl.style.transform = "";
+
+    // 大きく下に動いたら隠す
+    // （体感しきい値）
+    const rect = listHeaderEl.getBoundingClientRect();
+    // dy を保持してないので transform を見ずに、直近動きで判断できない。
+    // 代わりに「軽くでも引っ張ったら隠す」だと誤爆するので、ここはタップで確実に隠す運用が主。
+    // touchmove で 120px 以上引っ張ったら隠す、を実装するために dy を保持。
+  });
+
+  // dy保持版（上書き）
+  let lastDy = 0;
+  listHeaderEl.addEventListener("touchstart", (e) => {
+    if (!isMobile()) return;
+    if (listCollapsed) return;
+    dragging = true;
+    lastDy = 0;
+    startY = e.touches[0].clientY;
+  }, { passive:true });
+
+  listHeaderEl.addEventListener("touchmove", (e) => {
+    if (!dragging) return;
+    const y = e.touches[0].clientY;
+    const dy = y - startY;
+    lastDy = dy;
+
+    if (dy <= 0) return;
+    listEl.style.transition = "none";
+    listEl.style.transform = `translateY(${Math.min(dy, 260)}px)`;
+  }, { passive:true });
+
+  listHeaderEl.addEventListener("touchend", () => {
+    if (!dragging) return;
+    dragging = false;
+
+    listEl.style.transition = "";
+    listEl.style.transform = "";
+
+    if (lastDy > 120){
+      setListCollapsed(true);
+    }
+  });
+
+  // 画面回転/リサイズで状態補正
+  window.addEventListener("resize", () => {
+    setListCollapsed(isMobile() ? listCollapsed : false);
+  });
+}
+
+/* ===== リスト描画（listBodyに描く） ===== */
 function drawList(items, day){
-  const list = document.getElementById("list");
-  list.innerHTML = `<b>${dayTitles[day]}に登れる山</b><br>`;
+  // PCは #list 自体がスクロール、スマホは #listBody がスクロール
+  const target = isMobile() ? listBodyEl : listEl;
+
+  if (isMobile()){
+    // スマホ：ヘッダは固定で出す（CSSで表示）
+    target.innerHTML = `<div style="padding:8px 10px; font-weight:700;">${dayTitles[day]}に登れる山</div>`;
+  } else {
+    // PC：従来通り
+    target.innerHTML = `<b>${dayTitles[day]}に登れる山</b><br>`;
+  }
 
   items.forEach(({ m, best, marker }) => {
     const meta = m.weather?._meta;
@@ -480,21 +609,20 @@ function drawList(items, day){
       標高:${m.elev}m / ${escapeHtml(m.level)}<br>
       ベスト:${best ? `${best.time}（${best.score}）` : "-"}
     `;
-
     div.onclick = () => {
+      // スマホ：山名が分かる導線として、リストをタップしたら “一旦隠す＋ピンへ移動＋ポップアップ”
+      if (isMobile()) setListCollapsed(true);
       map.setView([m.lat, m.lng], 11);
-      if (isMobile()) openMobileDetail(m);
-      else marker.openPopup();
+      marker.openPopup();
     };
-
-    list.appendChild(div);
+    target.appendChild(div);
   });
 }
 
 /* ===== 重要：マーカーは作り直さない ===== */
 const markerEntries = []; // { m, marker, shown }
 
-/* ===== 状態取得 ===== */
+/* ===== 画面状態（フィルタ取得） ===== */
 function getState(){
   const day = Number(document.getElementById("day").value);
   const time = getSelectedTime();
@@ -512,10 +640,12 @@ function getState(){
   return { day, time, dateKey, goodOnly, scores, levels };
 }
 
-/* ===== 表示更新（再生成しない） ===== */
+/* ===== ビュー更新（ポップアップ維持） ===== */
 function updateView(){
   const { day, time, dateKey, goodOnly, scores, levels } = getState();
   const items = [];
+
+  const reopenTarget = openedMarker;
 
   for (const entry of markerEntries){
     const m = entry.m;
@@ -534,28 +664,21 @@ function updateView(){
         entry.shown = true;
       }
 
-      // PCでポップアップ開いてる間は setIcon しない（閉じる原因になりがち）
-      const openNow = (!isMobile() && marker.isPopupOpen && marker.isPopupOpen());
-      if (!openNow){
+      const isOpenNow = marker.isPopupOpen && marker.isPopupOpen();
+      if (!isOpenNow) {
         marker.setIcon(icons[score]);
       }
 
-      // PCはポップアップ内容を更新（開いていれば即反映）
-      if (!isMobile()){
-        const newHtml = popupHtml(m, time);
-        const pop = marker.getPopup();
-        if (pop) pop.setContent(newHtml);
-        else marker.bindPopup(newHtml);
-      } else {
-        // スマホはポップアップを使わない（bindしてるなら外す）
-        if (marker.getPopup()) marker.unbindPopup();
-      }
+      const newHtml = popupHtml(m, time);
+      const pop = marker.getPopup();
+      if (pop) pop.setContent(newHtml);
+      else marker.bindPopup(newHtml);
 
       const best = getBestTime(m.weather, dateKey);
       items.push({ m, best, marker });
-
     } else {
-      if (openedMarker === marker) openedMarker = null;
+      if (reopenTarget === marker) openedMarker = null;
+
       if (entry.shown){
         markerLayer.removeLayer(marker);
         entry.shown = false;
@@ -564,36 +687,32 @@ function updateView(){
   }
 
   drawList(items, day);
+
+  // ポップアップ維持（閉じたら即復帰）
+  if (reopenTarget && markerLayer.hasLayer(reopenTarget)) {
+    setTimeout(() => {
+      if (!reopenTarget.isPopupOpen()) reopenTarget.openPopup();
+    }, 0);
+  }
+
   setTimeout(() => map.invalidateSize(), 100);
 }
 
 /* ===== 初期化 ===== */
 async function init(){
-  // 天気生成
   await Promise.all(mountains.map(async m => {
     if (!m.weather || Object.keys(m.weather).length === 0) {
       m.weather = await generateWeatherScore(m.name, m.lat, m.lng);
     }
   }));
 
-  // マーカーを一度だけ作成して保持
   for (const m of mountains){
-    const marker = L.marker([m.lat, m.lng], { icon: icons["C"] });
+    const marker = L.marker([m.lat, m.lng], { icon: icons["C"] }); // 仮
+    marker.bindPopup(popupHtml(m, getSelectedTime()));
 
-    // PCのみポップアップを使う（スマホは新しい画面）
-    if (!isMobile()){
-      marker.bindPopup(popupHtml(m, getSelectedTime()));
-      marker.on("popupopen", () => { openedMarker = marker; });
-      marker.on("popupclose", () => {
-        if (openedMarker === marker) openedMarker = null;
-      });
-    }
-
-    // スマホ：クリックで新しい画面
-    marker.on("click", () => {
-      if (isMobile()) {
-        openMobileDetail(m);
-      }
+    marker.on("popupopen", () => { openedMarker = marker; });
+    marker.on("popupclose", () => {
+      if (openedMarker === marker) openedMarker = null;
     });
 
     markerEntries.push({ m, marker, shown:false });
@@ -603,9 +722,15 @@ async function init(){
   document.querySelectorAll("#control input,#control select")
     .forEach(e => e.addEventListener("change", updateView));
 
+  initMobileListGestures();
+
+  // 初回描画
   const apiCount = mountains.filter(m => m.weather?._meta?.source === "api").length;
   const dummyCount = mountains.length - apiCount;
   console.log(`weather sources: api=${apiCount}, dummy=${dummyCount}`);
+
+  // スマホ初期：リストは表示（必要なら true にすると最初から隠れる）
+  setListCollapsed(false);
 
   updateView();
 }
