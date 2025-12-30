@@ -17,18 +17,14 @@ body { margin:0; font-family: system-ui, -apple-system, BlinkMacSystemFont, sans
   font-size:14px;
   display:flex;
   flex-wrap:wrap;
-  gap:8px;
-  align-items:center;
+  gap:6px;
 }
-#control b{ margin-right:4px; }
-#control select{ padding:4px; }
-#control input[type="range"]{ width:160px; }
 
 /* ===== レイアウト ===== */
-#container{ height:calc(100vh - 56px); position:relative; }
+#container{ height:calc(100vh - 110px); position:relative; }
 #map{ height:100%; width:100%; }
 
-/* ===== リスト（PC用） ===== */
+/* ===== リスト ===== */
 #list{
   position:absolute;
   right:0; top:0;
@@ -39,20 +35,11 @@ body { margin:0; font-family: system-ui, -apple-system, BlinkMacSystemFont, sans
   font-size:13px;
   z-index:1000;
 }
-.list-head{
-  padding:10px 10px 8px;
-  border-bottom:1px solid #eee;
-  font-weight:700;
-}
-.list-item{
-  border-bottom:1px solid #eee;
-  padding:9px 10px;
-  cursor:pointer;
-}
-.list-item:hover{ background:#eef6ff; }
 
 /* ===== popup ===== */
-.leaflet-popup-content{ max-width:360px; }
+.leaflet-popup-content{
+  max-width:340px;
+}
 .popup h3{
   margin:0 0 4px;
   font-size:16px;
@@ -63,8 +50,8 @@ body { margin:0; font-family: system-ui, -apple-system, BlinkMacSystemFont, sans
   border-radius:12px;
   font-size:11px;
 }
-.badge-api{ background:#e7f7ea; border:1px solid #9ad3a5; }
-.badge-dummy{ background:#fff0f0; border:1px solid #e0a3a3; }
+.badge-api{ background:#e7f7ea; }
+.badge-dummy{ background:#fff0f0; }
 
 hr{ border:none; border-top:1px solid #ddd; margin:6px 0; }
 
@@ -73,7 +60,6 @@ table{
   width:100%;
   border-collapse:collapse;
   font-size:12px;
-  table-layout:fixed;
 }
 th, td{
   border:1px solid #ddd;
@@ -81,51 +67,26 @@ th, td{
   text-align:center;
 }
 th{ background:#f7f7f7; }
-td.sel{
-  outline:2px solid #5aa7ff;
-  outline-offset:-2px;
-  font-weight:800;
-  background:#eef6ff;
-}
-td.a{ background:#eaf7ee; }
-td.b{ background:#fff7db; }
-td.c{ background:#ffe7e7; }
 
-/* ===== 折り畳み（details依存しない） ===== */
-.acc{
-  border:1px solid #e5e5e5;
-  border-radius:10px;
-  overflow:hidden;
-  margin-top:8px;
-}
-.acc-h{
-  user-select:none;
+/* ===== fold ===== */
+details summary{
   cursor:pointer;
-  padding:10px 10px;
-  background:#fafafa;
-  font-weight:700;
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
+  font-weight:600;
+  padding:6px 0;
 }
-.acc-h .chev{ font-size:12px; opacity:0.75; }
-.acc-b{
-  display:none;
-  padding:10px;
-  background:#fff;
-}
-.acc.open .acc-b{ display:block; }
 
 /* ===== スマホ最適化 ===== */
 @media (max-width:768px){
-  /* ✅スマホではリストを出さない（地図を最大化） */
-  #list{ display:none; }
-
-  #container{ height:calc(100vh - 56px); }
+  #list{
+    width:100%;
+    height:42%;
+    bottom:0; top:auto;
+    border-left:none;
+    border-top:1px solid #ccc;
+  }
   .leaflet-popup-content{
     font-size:14px;
     line-height:1.5;
-    max-width:92vw;
   }
   table{ font-size:13px; }
 }
@@ -135,21 +96,17 @@ td.c{ background:#ffe7e7; }
 <body>
 
 <div id="control">
-  <div>
-    <b>日付</b>
-    <select id="day">
-      <option value="0">今日</option>
-      <option value="1">1日後</option>
-      <option value="2">2日後</option>
-      <option value="3">3日後</option>
-    </select>
-  </div>
+  <b>日付</b>
+  <select id="day">
+    <option value="0">今日</option>
+    <option value="1">1日後</option>
+    <option value="2">2日後</option>
+    <option value="3">3日後</option>
+  </select>
 
-  <div>
-    <b>時間</b>
-    <input type="range" id="timeSlider" min="0" max="5" value="0">
-    <span id="timeLabel">06–08</span>
-  </div>
+  <b>時間</b>
+  <input type="range" id="timeSlider" min="0" max="5" value="0">
+  <span id="timeLabel">06–08</span>
 </div>
 
 <div id="container">
@@ -163,195 +120,63 @@ td.c{ background:#ffe7e7; }
 import mountains from "./mountains.js";
 import { generateWeatherScore } from "./weather.js";
 
-/* ===== 時間帯 ===== */
 const timeSlots = ["06:00","08:00","10:00","12:00","14:00","16:00"];
 const timeLabels = ["06–08","08–10","10–12","12–14","14–16","16–18"];
 
 const slider = document.getElementById("timeSlider");
 const timeLabel = document.getElementById("timeLabel");
-slider.oninput = () => { timeLabel.textContent = timeLabels[slider.value]; refreshUI(); };
-document.getElementById("day").onchange = () => refreshUI();
-
-const getSelectedTime = () => timeSlots[Number(slider.value)];
-const getSelectedTimeIdx = () => Number(slider.value);
+slider.oninput = () => timeLabel.textContent = timeLabels[slider.value];
+const getSelectedTime = () => timeSlots[slider.value];
 
 function getDateKey(d){
   const t = new Date();
   t.setDate(t.getDate()+d);
   return t.toISOString().slice(0,10);
 }
-const dayTitles = ["今日","+1日","+2日","+3日"];
 
-/* ===== map ===== */
 const map = L.map("map").setView([36.5,138],5);
-L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png", {
-  attribution:"地理院地図"
-}).addTo(map);
+L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png").addTo(map);
 
 const markerLayer = L.layerGroup().addTo(map);
-
-/* ===== helpers ===== */
-function escapeHtml(str){
-  return String(str)
-    .replaceAll("&","&amp;")
-    .replaceAll("<","&lt;")
-    .replaceAll(">","&gt;")
-    .replaceAll('"',"&quot;")
-    .replaceAll("'","&#39;");
-}
-function scoreCellClass(score){
-  if (score === "A") return "a";
-  if (score === "B") return "b";
-  if (score === "C") return "c";
-  return "";
-}
-
-/* ===== 折り畳みUI（自前） ===== */
-function acc(title, bodyHtml, openByDefault=false){
-  const openClass = openByDefault ? "open" : "";
-  return `
-    <div class="acc ${openClass}" data-acc="1">
-      <div class="acc-h" role="button" tabindex="0">
-        <span>${title}</span><span class="chev">▼</span>
-      </div>
-      <div class="acc-b">${bodyHtml}</div>
-    </div>
-  `;
-}
-function bindAccordions(rootEl){
-  rootEl.querySelectorAll('.acc[data-acc="1"] .acc-h').forEach(h => {
-    h.onclick = () => {
-      const accEl = h.closest(".acc");
-      accEl.classList.toggle("open");
-      const chev = h.querySelector(".chev");
-      if (chev) chev.textContent = accEl.classList.contains("open") ? "▲" : "▼";
-    };
-    h.onkeydown = (e) => {
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); h.click(); }
-    };
-  });
-}
-
-/* ===== popup HTML ===== */
-function buildScoreGrid(m){
-  const selDay = Number(document.getElementById("day").value);
-  const selTime = getSelectedTime();
-
-  const head = `<tr><th style="width:16%"></th>${timeLabels.map(l=>`<th>${l}</th>`).join("")}</tr>`;
-  const rows = [0,1,2,3].map(d=>{
-    const dk = getDateKey(d);
-    const tds = timeSlots.map(t=>{
-      const s = m.weather?.[dk]?.[t] ?? "-";
-      const base = scoreCellClass(s);
-      const sel = (d===selDay && t===selTime) ? "sel" : "";
-      return `<td class="${base} ${sel}">${s}</td>`;
-    }).join("");
-    return `<tr><th>${dayTitles[d]}</th>${tds}</tr>`;
-  }).join("");
-
-  return `<table><thead>${head}</thead><tbody>${rows}</tbody></table>`;
-}
 
 function popupHtml(m){
   const day = Number(document.getElementById("day").value);
   const time = getSelectedTime();
-  const dk = getDateKey(day);
-  const score = m.weather?.[dk]?.[time] ?? "-";
-
-  const src = m.weather?._meta?.source === "api" ? "API" : "DUMMY";
-  const badge = m.weather?._meta?.source === "api" ? "badge-api" : "badge-dummy";
-
-  // 折り畳み（スマホでも確実に動く）
-  const grid = acc("スコア早見表（今日〜3日後 × 全時間帯）", buildScoreGrid(m), false);
+  const score = m.weather?.[getDateKey(day)]?.[time] ?? "-";
 
   return `
     <div class="popup">
-      <h3>${escapeHtml(m.name)}</h3>
-      <span class="badge ${badge}">${src}</span>
+      <h3>${m.name}</h3>
+      <span class="badge ${m.weather._meta?.source==="api"?"badge-api":"badge-dummy"}">
+        ${m.weather._meta?.source?.toUpperCase() || "DUMMY"}
+      </span>
 
       <hr>
       <b>おすすめ</b><br>
-      ${dayTitles[day]} ${timeLabels[getSelectedTimeIdx()]}：<b>${score}</b>
+      ${day===0?"今日":"+"+day+"日"} ${timeLabels[slider.value]}：<b>${score}</b>
 
-      ${grid}
-      <small style="display:block;margin-top:6px;color:#555;">※タップで開閉</small>
+      <details>
+        <summary>スコア早見表</summary>
+        <table>
+          <tr><th></th>${timeLabels.map(t=>`<th>${t}</th>`).join("")}</tr>
+          ${[0,1,2,3].map(d=>`
+            <tr>
+              <th>${d===0?"今日":"+"+d+"日"}</th>
+              ${timeSlots.map(t=>`<td>${m.weather?.[getDateKey(d)]?.[t]||"-"}</td>`).join("")}
+            </tr>
+          `).join("")}
+        </table>
+      </details>
     </div>
   `;
 }
 
-/* ===== markers + list ===== */
-const entries = []; // { m, marker }
-
-/* ポップアップ維持用 */
-let openedMarker = null;
-
-function drawList(){
-  const list = document.getElementById("list");
-  list.innerHTML = `<div class="list-head">百名山リスト</div>`;
-
-  for (const e of entries){
-    const div = document.createElement("div");
-    div.className = "list-item";
-    div.textContent = e.m.name;
-    div.onclick = () => {
-      map.setView([e.m.lat, e.m.lng], 11);
-      e.marker.openPopup();
-    };
-    list.appendChild(div);
-  }
-}
-
-/* ポップアップの内容更新（閉じたら即復帰） */
-function refreshOpenPopup(){
-  if (!openedMarker) return;
-  // 表示されていない/破棄されているなら解除
-  if (!markerLayer.hasLayer(openedMarker)) { openedMarker = null; return; }
-
-  // content更新（LeafletはDOMを作り直すので、再バインド）
-  const ent = entries.find(x => x.marker === openedMarker);
-  if (!ent) { openedMarker = null; return; }
-
-  openedMarker.getPopup().setContent(popupHtml(ent.m));
-
-  // 端末によっては更新で閉じるので即復帰
-  setTimeout(() => {
-    if (openedMarker && !openedMarker.isPopupOpen()) openedMarker.openPopup();
-    // accordion click binding
-    const popEl = document.querySelector(".leaflet-popup-content");
-    if (popEl) bindAccordions(popEl);
-  }, 0);
-}
-
-function refreshUI(){
-  // 開いているポップアップだけを更新する（全マーカー更新不要）
-  refreshOpenPopup();
-}
-
-/* ===== init ===== */
 (async()=>{
   for(const m of mountains){
-    m.weather = await generateWeatherScore(m.name, m.lat, m.lng);
-
-    const marker = L.marker([m.lat, m.lng]).addTo(markerLayer);
+    m.weather = await generateWeatherScore(m.name,m.lat,m.lng);
+    const marker = L.marker([m.lat,m.lng]).addTo(markerLayer);
     marker.bindPopup(popupHtml(m));
-
-    marker.on("popupopen", (ev) => {
-      openedMarker = marker;
-      // popup内のaccordionを有効化
-      const popEl = document.querySelector(".leaflet-popup-content");
-      if (popEl) bindAccordions(popEl);
-    });
-    marker.on("popupclose", () => {
-      if (openedMarker === marker) openedMarker = null;
-    });
-
-    entries.push({ m, marker });
   }
-
-  drawList();
-
-  // 初期ラベル
-  timeLabel.textContent = timeLabels[slider.value];
 })();
 </script>
 
