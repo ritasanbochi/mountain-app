@@ -1,29 +1,21 @@
-// weather.js (tenkura-like, v4)
-// Open-Meteo を優先し、失敗時はダミーでフォールバック。
-// 「てんくら寄せ」：Cを出しにくくし、雨風の"強さ"中心に判断。
+// weather.js (tenkura-like, precip-primary, v5)
+//
+// 方針：
+// - スコアは「降水（天気）」を主軸に決める
+// - 風・突風・気温は “危険域/極端” のときだけ補助的に格下げ
+// - てんくら寄せ：Cを出しにくくする（＝危険域は明確にC、それ以外はB止まりが多い）
+//
 // index.html 側は generateWeatherScore(name, lat, lng, level) を呼ぶ前提。
 
 const OPEN_METEO_ENDPOINT = "https://api.open-meteo.com/v1/forecast";
 const TIMEZONE = "Asia/Tokyo";
 
 // キャッシュ（localStorage）
-const CACHE_PREFIX = "mount_weather_v4_"; // ★ v4にして旧キャッシュを無効化
+const CACHE_PREFIX = "mount_weather_v5_"; // ★ v5: 旧キャッシュ無効化
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1時間
 
 // UIが使う時間帯（index.htmlと合わせる）
 const TIME_SLOTS = ["06:00", "08:00", "10:00", "12:00", "14:00", "16:00"];
-
-/** ===== 判定ロジック（てんくら寄せ・緩め） =====
- *  - 基本は「雨・風の強さ」で判断
- *  - 最終判定は worst-of（最悪が勝つ）
- *  - 難易度補正は控えめ（初級を少し厳しく、上級を少し緩く）
- *
- *  中級（基準）:
- *   降水(mm/h): A<=0.5, B<=2.0, C>2.0
- *   平均風(m/s): A<=10,  B<=15,  C>15
- *   突風(m/s):  A<=15,  B<=22,  C>22
- *   気温(℃):    A>=0,   B>=-5,  C<-5
- */
 
 function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
 function toNumber(x) {
@@ -31,90 +23,139 @@ function toNumber(x) {
   return Number.isFinite(n) ? n : null;
 }
 function pad2(n){ return String(n).padStart(2, "0"); }
-function dateKey(d){
+function dateKeyLocal(d){
   return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
 }
-function isoNow(){
-  return new Date().toISOString();
-}
-function scoreWorst(a, b){
-  const pr = { A: 3, B: 2, C: 1 };
+function isoNow(){ return new Date().toISOString(); }
+
+const pr = { A: 3, B: 2, C: 1 };
+function worse(a, b){
   if (!a) return b;
   if (!b) return a;
-  return pr[a] <= pr[b] ? a : b; // 数値が小さいほど悪い
+  return pr[a] <= pr[b] ? a : b;
 }
 
+/**
+ * てんくら寄せ（降水主軸）
+ * - 降水がメイン
+ * - 風/突風/低温は “危険域” でのみ格下げ
+ *
+ * ▼降水(mm/h)で基本スコア
+ *   A: <= 1.0
+ *   B: <= 4.0
+ *   C: > 4.0
+ *
+ * ▼風(m/s)・突風(m/s)で補助（危険域は明確に）
+ *   風 or 突風が危険域 → C
+ *     wind >= 20  または gust >= 30
+ *   注意域 → 最大B（AならBに落とす程度）
+ *     wind >= 15  または gust >= 23
+ *
+ * ▼気温(℃)で補助（極端な寒さだけ）
+ *   temp <= -12 → C
+ *   temp <= -6  → 最大B
+ *
+ * 難易度補正（最小限）
+ *   初級: 風・突風の閾値を少し厳しめ、低温も少し厳しめ
+ *   上級: ほぼ据え置き（少しだけ緩め）
+ */
 function thresholdsByLevel(level){
-  // てんくら寄せ：補正は控えめ
   const base = {
-    rainA: 0.5, rainB: 2.0,   // mm/h
-    windA: 10,  windB: 15,    // m/s
-    gustA: 15,  gustB: 22,    // m/s
-    tempA: 0,   tempB: -5     // ℃（tempB未満はC）
+    // precip
+    rainA: 1.0, rainB: 4.0,
+
+    // wind/gust (support)
+    windWarn: 15, windDanger: 20,
+    gustWarn: 23, gustDanger: 30,
+
+    // temp (support)
+    tempWarn: -6, tempDanger: -12
   };
 
-  if (level === "初級") {
+  if (level === "初級"){
     return {
-      rainA: 0.3, rainB: 1.5,
-      windA: 9,   windB: 14,
-      gustA: 14,  gustB: 20,
-      tempA: 2,   tempB: -3
+      rainA: 0.8, rainB: 3.5,
+      windWarn: 14, windDanger: 18,
+      gustWarn: 21, gustDanger: 28,
+      tempWarn: -4, tempDanger: -10
     };
   }
-  if (level === "上級") {
+  if (level === "上級"){
     return {
-      rainA: 0.7, rainB: 2.5,
-      windA: 11,  windB: 16,
-      gustA: 16,  gustB: 24,
-      tempA: -2,  tempB: -7
+      rainA: 1.2, rainB: 4.5,
+      windWarn: 16, windDanger: 22,
+      gustWarn: 25, gustDanger: 32,
+      tempWarn: -7, tempDanger: -13
     };
   }
   return base; // 中級
 }
 
-function scoreFromValue(val, aMax, bMax, reverse=false){
-  // reverse=false: 小さいほど良い（雨/風/突風）
-  // reverse=true : 大きいほど良い（気温）
-  if (val === null) return null;
-  if (!reverse) {
-    if (val <= aMax) return "A";
-    if (val <= bMax) return "B";
-    return "C";
-  } else {
-    if (val >= aMax) return "A";
-    if (val >= bMax) return "B";
-    return "C";
-  }
+function baseScoreByPrecip(p, th){
+  if (p === null) return null;
+  if (p <= th.rainA) return "A";
+  if (p <= th.rainB) return "B";
+  return "C";
 }
 
-function mountainScore(level, metrics){
+function applyWindSupport(score, wind, gust, th){
+  // 危険域ならC
+  const danger = (wind !== null && wind >= th.windDanger) || (gust !== null && gust >= th.gustDanger);
+  if (danger) return "C";
+
+  // 注意域なら最大B（A→Bに落とす）
+  const warn = (wind !== null && wind >= th.windWarn) || (gust !== null && gust >= th.gustWarn);
+  if (warn && score === "A") return "B";
+
+  return score;
+}
+
+function applyTempSupport(score, temp, th){
+  if (temp === null) return score;
+
+  // 極端な低温はC
+  if (temp <= th.tempDanger) return "C";
+
+  // 低温注意は最大B（A→Bに落とす）
+  if (temp <= th.tempWarn && score === "A") return "B";
+
+  return score;
+}
+
+function scoreWithComponents(level, metrics){
   const th = thresholdsByLevel(level);
 
-  const sRain = scoreFromValue(metrics.precipitation, th.rainA, th.rainB, false);
-  const sWind = scoreFromValue(metrics.windspeed,     th.windA, th.windB, false);
-  const sGust = scoreFromValue(metrics.gust,          th.gustA, th.gustB, false);
-  const sTemp = scoreFromValue(metrics.temp,          th.tempA, th.tempB, true);
+  const p = metrics.precipitation;
+  const w = metrics.windspeed;
+  const g = metrics.gust;
+  const t = metrics.temp;
 
-  // 最悪勝ち
-  let s = null;
-  s = scoreWorst(s, sRain);
-  s = scoreWorst(s, sWind);
-  s = scoreWorst(s, sGust);
-  s = scoreWorst(s, sTemp);
+  // ① 基本は降水で決める
+  let s = baseScoreByPrecip(p, th);
+
+  // ② 風/突風は補助（危険域でC、注意域でA→B）
+  s = applyWindSupport(s, w, g, th);
+
+  // ③ 気温は補助（極端ならC、注意ならA→B）
+  s = applyTempSupport(s, t, th);
 
   return {
     score: s,
-    components: { rain: sRain, wind: sWind, gust: sGust, temp: sTemp },
-    thresholds: th
+    thresholds: th,
+    components: {
+      baseByPrecip: baseScoreByPrecip(p, th),
+      windApplied: ((w !== null && w >= th.windWarn) || (g !== null && g >= th.gustWarn)) ? true : false,
+      tempApplied: (t !== null && t <= th.tempWarn) ? true : false
+    }
   };
 }
 
 /** ===== Open-Meteo 取得 =====
- *  hourly:
- *   - precipitation (mm)
- *   - wind_speed_10m (m/s)
- *   - wind_gusts_10m (m/s)
- *   - temperature_2m (°C)
+ * hourly:
+ *  - precipitation (mm)
+ *  - wind_speed_10m (m/s)
+ *  - wind_gusts_10m (m/s)
+ *  - temperature_2m (°C)
  */
 async function fetchOpenMeteo(lat, lng){
   const params = new URLSearchParams({
@@ -127,9 +168,7 @@ async function fetchOpenMeteo(lat, lng){
   const url = `${OPEN_METEO_ENDPOINT}?${params.toString()}`;
 
   const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Open-Meteo HTTP ${res.status}`);
-  }
+  if (!res.ok) throw new Error(`Open-Meteo HTTP ${res.status}`);
   const json = await res.json();
   return { json, url };
 }
@@ -145,12 +184,7 @@ function pickAtHour(hourly, wantIso){
   const g = toNumber(hourly.wind_gusts_10m?.[idx]);
   const t = toNumber(hourly.temperature_2m?.[idx]);
 
-  return {
-    precipitation: p,
-    windspeed: w,
-    gust: g,
-    temp: t
-  };
+  return { precipitation: p, windspeed: w, gust: g, temp: t };
 }
 
 function buildFromHourly(name, lat, lng, level, hourly){
@@ -159,26 +193,26 @@ function buildFromHourly(name, lat, lng, level, hourly){
 
   for (let d = 0; d < 4; d++){
     const dt = new Date();
-    dt.setHours(0,0,0,0);
+    dt.setHours(0,0,0,0); // ローカル0時基準
     dt.setDate(dt.getDate() + d);
-    const dk = dateKey(dt);
+    const dk = dateKeyLocal(dt);
 
     out[dk] = {};
     details[dk] = {};
 
     for (const slot of TIME_SLOTS){
       const hour = slot.slice(0,2);
+      // Open-Meteo timezone=Asia/Tokyo の hourly.time は "YYYY-MM-DDTHH:00" のはず
       const wantIso = `${dk}T${hour}:00`;
 
       const m = pickAtHour(hourly, wantIso);
-
       if (!m) {
         out[dk][slot] = null;
         details[dk][slot] = null;
         continue;
       }
 
-      const judged = mountainScore(level, m);
+      const judged = scoreWithComponents(level, m);
       out[dk][slot] = judged.score ?? null;
       details[dk][slot] = {
         ...m,
@@ -192,6 +226,22 @@ function buildFromHourly(name, lat, lng, level, hourly){
 }
 
 /** ===== ダミー（フォールバック） ===== */
+function hashCode(str){
+  let h = 0;
+  for (let i=0; i<str.length; i++){
+    h = ((h << 5) - h) + str.charCodeAt(i);
+    h |= 0;
+  }
+  return h >>> 0;
+}
+function mulberry32(a){
+  return function() {
+    let t = a += 0x6D2B79F5;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+}
 function dummyWeather(name, lat, lng, level, reason){
   const out = {};
   const details = {};
@@ -204,20 +254,20 @@ function dummyWeather(name, lat, lng, level, reason){
   for (let d = 0; d < 4; d++){
     const dt = new Date(now.getTime());
     dt.setDate(dt.getDate() + d);
-    const dk = dateKey(dt);
+    const dk = dateKeyLocal(dt);
 
     out[dk] = {};
     details[dk] = {};
 
     for (const slot of TIME_SLOTS){
-      // “緩め”ロジックに合わせて、ダミー値も過激にしない
-      const precipitation = clamp((rand() * 2.8), 0, 5);    // 0〜5mm/h
-      const windspeed     = clamp((rand() * 14), 0, 18);   // 0〜18m/s
-      const gust          = clamp(windspeed + rand()*8, 0, 26);
-      const temp          = clamp((rand() * 18) - 2, -10, 22); // -10〜22℃
+      // 「厳しすぎ」回避：ダミーも極端にしない
+      const precipitation = clamp(rand() * 5.5, 0, 8);     // 0〜8mm/h
+      const windspeed     = clamp(rand() * 16, 0, 24);     // 0〜24m/s
+      const gust          = clamp(windspeed + rand()*10, 0, 36);
+      const temp          = clamp((rand() * 20) - 3, -15, 25);
 
       const m = { precipitation, windspeed, gust, temp };
-      const judged = mountainScore(level, m);
+      const judged = scoreWithComponents(level, m);
 
       out[dk][slot] = judged.score ?? "B";
       details[dk][slot] = {
@@ -240,30 +290,12 @@ function dummyWeather(name, lat, lng, level, reason){
   };
 }
 
-function hashCode(str){
-  let h = 0;
-  for (let i=0; i<str.length; i++){
-    h = ((h << 5) - h) + str.charCodeAt(i);
-    h |= 0;
-  }
-  return h >>> 0;
-}
-function mulberry32(a){
-  return function() {
-    let t = a += 0x6D2B79F5;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  }
-}
-
 /** ===== キャッシュ ===== */
 function cacheKey(lat, lng){
   const la = Number(lat).toFixed(3);
   const ln = Number(lng).toFixed(3);
   return `${CACHE_PREFIX}${la}_${ln}`;
 }
-
 function loadCache(lat, lng){
   try{
     const key = cacheKey(lat, lng);
@@ -274,14 +306,13 @@ function loadCache(lat, lng){
 
     const t = new Date(obj.fetchedAt).getTime();
     if (!Number.isFinite(t)) return null;
-
     if (Date.now() - t > CACHE_TTL_MS) return null;
+
     return obj;
   }catch{
     return null;
   }
 }
-
 function saveCache(lat, lng, payload){
   try{
     const key = cacheKey(lat, lng);
@@ -308,6 +339,7 @@ export async function generateWeatherScore(name, lat, lng, level="中級"){
     if (!hourly) throw new Error("Open-Meteo hourly missing");
 
     const { out, details } = buildFromHourly(name, lat, lng, level, hourly);
+
     const meta = {
       source: "api",
       fetchedAt: isoNow(),
