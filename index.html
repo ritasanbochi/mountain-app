@@ -333,13 +333,8 @@ function nearestTimeSlotIndexNow(){
   const now = new Date();
   const nowMin = now.getHours() * 60 + now.getMinutes();
 
-  // 各枠の「開始時刻」を分に変換（06:00,08:00...）
-  const starts = timeSlots.map(s => {
-    const h = Number(s.slice(0,2));
-    return h * 60;
-  });
+  const starts = timeSlots.map(s => Number(s.slice(0,2)) * 60);
 
-  // 一番近い開始時刻を選ぶ（同点は早い方）
   let bestIdx = 0;
   let bestDiff = Infinity;
   starts.forEach((min, idx) => {
@@ -350,9 +345,8 @@ function nearestTimeSlotIndexNow(){
     }
   });
 
-  // ただし、早朝/夜で不自然にならないように端を保護
-  if (nowMin < starts[0]) return 0;                     // 06:00より前 → 06:00
-  if (nowMin > starts[starts.length - 1] + 120) return starts.length - 1; // 18:00以降想定 → 16:00
+  if (nowMin < starts[0]) return 0;
+  if (nowMin > starts[starts.length - 1] + 120) return starts.length - 1;
   return bestIdx;
 }
 
@@ -366,6 +360,17 @@ slider.oninput = () => {
   updateView();
 };
 const getSelectedTime = () => timeSlots[Number(slider.value)];
+
+/* ✅ 追加：日付を今日に戻した瞬間も、最寄り枠へ */
+daySelect.addEventListener("change", () => {
+  if (Number(daySelect.value) === 0) {
+    setSliderIndex(nearestTimeSlotIndexNow());
+    // slider.oninput を呼ばず、ここで一回だけ更新
+    updateView();
+  } else {
+    updateView();
+  }
+});
 
 /* ===== 日付キー ===== */
 function getDateKey(offset){
@@ -805,12 +810,9 @@ function updateView(){
 
 /* ===== 初期化 ===== */
 async function init(){
-  // ✅ 要望：日付が「今日」の場合、時間帯を現在時刻に最も近い枠にする
-  if (Number(daySelect.value) === 0) {
-    setSliderIndex(nearestTimeSlotIndexNow());
-  } else {
-    setSliderIndex(Number(slider.value));
-  }
+  // 初期：今日なら最寄り枠
+  if (Number(daySelect.value) === 0) setSliderIndex(nearestTimeSlotIndexNow());
+  else setSliderIndex(Number(slider.value));
 
   // 難易度補正が効くよう m.level を渡す
   await Promise.all(mountains.map(async m => {
@@ -828,12 +830,14 @@ async function init(){
     markerEntries.push({ m, marker, shown:false });
   }
 
+  // NOTE: daySelect は上で専用ハンドラを付けているので、ここでは除外
   document.querySelectorAll("#control input,#control select")
-    .forEach(e => e.addEventListener("change", updateView));
+    .forEach(e => {
+      if (e === daySelect) return;
+      e.addEventListener("change", updateView);
+    });
 
   initMobileListGestures();
-
-  // スマホ初期：隠してタブだけ（B）
   setListCollapsed(isMobile() ? true : false);
 
   updateView();
