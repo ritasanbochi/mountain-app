@@ -458,7 +458,7 @@ function buildScoreGridHtml(m, selDay, selTime){
       const s = m.weather?.[dk]?.[t] ?? "-";
       const base = scoreCellClass(s);
       const sel = (d === selDay && t === selTime) ? "sel" : "";
-      return `<td class="${base} ${sel}">${s}</td>`;
+      return `<td class="${base} ${sel}">${s ?? "-"}</td>`;
     }).join("");
     bodyRows.push(`<tr><th>${dayTitles[d]}</th>${tds}</tr>`);
   }
@@ -500,7 +500,7 @@ function detailHtml(m, selectedTime){
     return `
       <tr class="${cls}">
         <td>${timeLabels[idx]}</td>
-        <td><b>${s}</b></td>
+        <td><b>${s ?? "-"}</b></td>
         <td>${d ? fmt(d.precipitation,1) : "-"}</td>
         <td>${d ? fmt(d.windspeed,1) : "-"}</td>
         <td>${d ? fmt(d.gust,1) : "-"}</td>
@@ -530,7 +530,7 @@ function detailHtml(m, selectedTime){
     const extra = di
       ? `（降水 ${fmt(di.precipitation,1)}mm / 風 ${fmt(di.windspeed,1)}m/s / 突風 ${fmt(di.gust,1)}m/s / 気温 ${fmt(di.temp,1)}℃）`
       : "";
-    lines.push(`${dayTitles[d]}（${dk}）：<b>${s}</b> ${extra}`);
+    lines.push(`${dayTitles[d]}（${dk}）：<b>${s ?? "-"}</b> ${extra}`);
   }
 
   let bestDay = null;
@@ -761,7 +761,6 @@ function updateView(){
 
   drawList(items, day);
 
-  // 詳細表示中なら内容も更新（スライダー/日付変更を反映）
   if (currentDetail?.mountain){
     detailTitle.textContent = currentDetail.mountain.name;
     detailBody.innerHTML = detailHtml(currentDetail.mountain, time);
@@ -772,10 +771,10 @@ function updateView(){
 
 /* ===== 初期化 ===== */
 async function init(){
-  // 予報取得（weather.js側で localStorage キャッシュ）
+  // ✅ ここが変更点：m.level を渡す（難易度補正が効く）
   await Promise.all(mountains.map(async m => {
     if (!m.weather || Object.keys(m.weather).length === 0) {
-      m.weather = await generateWeatherScore(m.name, m.lat, m.lng);
+      m.weather = await generateWeatherScore(m.name, m.lat, m.lng, m.level);
     }
   }));
 
@@ -793,7 +792,7 @@ async function init(){
 
   initMobileListGestures();
 
-  // ✅ スマホ初期（B）：隠してタブだけ
+  // スマホ初期：隠してタブだけ（B）
   setListCollapsed(isMobile() ? true : false);
 
   timeLabel.textContent = timeLabels[slider.value];
