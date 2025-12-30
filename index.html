@@ -105,18 +105,41 @@ small{ color:#555; }
 .score-grid .b{ background:#fff7db; }
 .score-grid .c{ background:#ffe7e7; }
 
+/* ===== ③追加：スマホ用 折り畳みUI（自前アコーディオン） ===== */
+.acc{
+  border:1px solid #e5e5e5;
+  border-radius:10px;
+  overflow:hidden;
+  margin:10px 0;
+}
+.acc-h{
+  user-select:none;
+  cursor:pointer;
+  padding:10px 10px;
+  background:#fafafa;
+  font-weight:700;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+.acc-h .chev{ font-size:12px; opacity:0.75; }
+.acc-b{
+  display:none;
+  padding:10px;
+  background:#fff;
+}
+.acc.open .acc-b{ display:block; }
+
 /* ===== スマホ対応 ===== */
 @media (max-width:768px){
-  #list{
-    width:100%;
-    height:45%;
-    bottom:0; top:auto;
-    border-left:none;
-    border-top:1px solid #ccc;
-  }
+  /* ✅③：スマホでは山リストを表示しない（地図を最大化） */
+  #list{ display:none; }
+
+  /* 既存のスマホ表現は維持 */
   .leaflet-popup-content{
     font-size:15px;
     line-height:1.5;
+    max-width:92vw;
   }
   .wx-table{ font-size:13px; }
   .score-grid{ font-size:13px; }
@@ -179,6 +202,43 @@ slider.oninput = () => {
   updateView(); // 再生成せず更新
 };
 const getSelectedTime = () => timeSlots[Number(slider.value)];
+
+/* ===== ③：スマホ判定 ===== */
+const isMobile = () => window.matchMedia && window.matchMedia("(max-width: 768px)").matches;
+
+/* ===== ③：アコーディオン HTML/バインド ===== */
+function acc(title, bodyHtml, openByDefault=false){
+  const openClass = openByDefault ? "open" : "";
+  const chev = openByDefault ? "▲" : "▼";
+  return `
+    <div class="acc ${openClass}" data-acc="1">
+      <div class="acc-h" role="button" tabindex="0">
+        <span>${title}</span><span class="chev">${chev}</span>
+      </div>
+      <div class="acc-b">${bodyHtml}</div>
+    </div>
+  `;
+}
+function bindAccordions(rootEl){
+  if (!rootEl) return;
+  rootEl.querySelectorAll('.acc[data-acc="1"] .acc-h').forEach(h => {
+    h.onclick = () => {
+      const box = h.closest(".acc");
+      box.classList.toggle("open");
+      const chev = h.querySelector(".chev");
+      if (chev) chev.textContent = box.classList.contains("open") ? "▲" : "▼";
+    };
+    h.onkeydown = (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); h.click(); }
+    };
+  });
+}
+function bindPopupUIForMarker(marker){
+  // Leafletのpopup elementから安全に取得
+  const el = marker?.getPopup?.()?.getElement?.();
+  if (!el) return;
+  bindAccordions(el);
+}
 
 /* ===== 日付キー ===== */
 function getDateKey(offset){
@@ -286,13 +346,13 @@ function getBestTime(weather, dateKey){
   return best;
 }
 
-/* ===== ポップアップHTML ===== */
+/* ===== ポップアップHTML（③：スマホは折り畳み） ===== */
 function popupHtml(m, selectedTime){
   const meta = m.weather?._meta;
-  const isApi = meta?.source === "api";
-  const badgeClass = isApi ? "badge-api" : "badge-dummy";
-  const srcText = isApi ? "API" : "DUMMY";
-  const reason = (!isApi && meta?.reason) ? `<br><small>取得失敗: ${escapeHtml(meta.reason)}</small>` : "";
+  const isApiSrc = meta?.source === "api";
+  const badgeClass = isApiSrc ? "badge-api" : "badge-dummy";
+  const srcText = isApiSrc ? "API" : "DUMMY";
+  const reason = (!isApiSrc && meta?.reason) ? `<br><small>取得失敗: ${escapeHtml(meta.reason)}</small>` : "";
 
   const day = Number(document.getElementById("day").value);
   const dateKey = getDateKey(day);
@@ -315,7 +375,7 @@ function popupHtml(m, selectedTime){
     `;
   }).join("");
 
-  const dayTable = `
+  const dayTableInner = `
     <b>${dayTitles[day]}（${dateKey}）時間帯別</b><br>
     <table class="wx-table">
       <thead>
@@ -340,6 +400,10 @@ function popupHtml(m, selectedTime){
 
     lines.push(`${dayTitles[d]}（${dk}）：<b>${s}</b> ${extra}`);
   }
+  const dayLinesInner = `
+    <b>${selectedTime} の天気（今日〜3日後）</b><br>
+    ${lines.join("<br>")}
+  `;
 
   let bestDay = null;
   for (let d = 0; d <= 3; d++) {
@@ -349,6 +413,12 @@ function popupHtml(m, selectedTime){
     if (!bestDay || scorePriority[s] > scorePriority[bestDay.score]) bestDay = { date: dk, day: dayTitles[d], score: s };
   }
 
+  // ③：スマホは折り畳み。PCは今まで通り展開表示。
+  const mobile = isMobile();
+  const gridBlock = mobile ? acc("スコア早見表（4×6）", grid, false) : `<hr>${grid}`;
+  const dayTableBlock = mobile ? acc(`選択日（${dayTitles[day]}）の詳細`, dayTableInner, false) : `<hr>${dayTableInner}`;
+  const dayLinesBlock = mobile ? acc("選択時間帯の 今日〜3日後", dayLinesInner, false) : `<hr>${dayLinesInner}`;
+
   return `
     <div class="popup">
       <b>${escapeHtml(m.name)}</b>
@@ -357,19 +427,15 @@ function popupHtml(m, selectedTime){
       難易度：${escapeHtml(m.level)}<br>
 
       <hr>
-      ${grid}
-
-      <hr>
-      ${dayTable}
-
-      <hr>
-      <b>${selectedTime} の天気（今日〜3日後）</b><br>
-      ${lines.join("<br>")}
-
-      <hr>
       <b>おすすめ：</b>
       ${bestDay ? `${bestDay.day}（${bestDay.date} / ${bestDay.score}）` : "判定不可"}
       ${reason}
+
+      ${gridBlock}
+      ${dayTableBlock}
+      ${dayLinesBlock}
+
+      ${mobile ? `<small>※ 各ブロックはタップで開閉できます</small>` : ``}
     </div>
   `;
 }
@@ -381,9 +447,9 @@ function drawList(items, day){
 
   items.forEach(({ m, best, marker }) => {
     const meta = m.weather?._meta;
-    const isApi = meta?.source === "api";
-    const badgeClass = isApi ? "badge-api" : "badge-dummy";
-    const srcText = isApi ? "API" : "DUMMY";
+    const isApiSrc = meta?.source === "api";
+    const badgeClass = isApiSrc ? "badge-api" : "badge-dummy";
+    const srcText = isApiSrc ? "API" : "DUMMY";
 
     const div = document.createElement("div");
     div.className = "list-item";
@@ -428,7 +494,6 @@ function updateView(){
   const { day, time, dateKey, goodOnly, scores, levels } = getState();
   const items = [];
 
-  // 開いているマーカーを、更新後に復帰させるため保持
   const reopenTarget = openedMarker;
 
   for (const entry of markerEntries){
@@ -448,22 +513,24 @@ function updateView(){
         entry.shown = true;
       }
 
-      // ★ポップアップ開いてる間は setIcon しない（閉じる原因になりがち）
       const isOpenNow = marker.isPopupOpen && marker.isPopupOpen();
       if (!isOpenNow) {
         marker.setIcon(icons[score]);
       }
 
-      // ポップアップ内容更新（開いていれば即反映）
       const newHtml = popupHtml(m, time);
       const pop = marker.getPopup();
       if (pop) pop.setContent(newHtml);
       else marker.bindPopup(newHtml);
 
+      // 開いているポップアップなら、折り畳みイベントを再バインド
+      if (isOpenNow) {
+        setTimeout(() => bindPopupUIForMarker(marker), 0);
+      }
+
       const best = getBestTime(m.weather, dateKey);
       items.push({ m, best, marker });
     } else {
-      // フィルタで消える場合：開いてたやつなら保持を解除
       if (reopenTarget === marker) openedMarker = null;
 
       if (entry.shown){
@@ -475,11 +542,10 @@ function updateView(){
 
   drawList(items, day);
 
-  // ★更新で閉じた場合でも、同じマーカーを即 reopen
   if (reopenTarget && markerLayer.hasLayer(reopenTarget)) {
-    // content更新が先に入るように、ほんの少し遅延
     setTimeout(() => {
       if (!reopenTarget.isPopupOpen()) reopenTarget.openPopup();
+      bindPopupUIForMarker(reopenTarget);
     }, 0);
   }
 
@@ -498,8 +564,11 @@ async function init(){
     const marker = L.marker([m.lat, m.lng], { icon: icons["C"] }); // 仮
     marker.bindPopup(popupHtml(m, getSelectedTime()));
 
-    // ★開いてるポップアップを追跡
-    marker.on("popupopen", () => { openedMarker = marker; });
+    marker.on("popupopen", () => {
+      openedMarker = marker;
+      // ③：開いた瞬間に折り畳みを有効化
+      setTimeout(() => bindPopupUIForMarker(marker), 0);
+    });
     marker.on("popupclose", () => {
       if (openedMarker === marker) openedMarker = null;
     });
