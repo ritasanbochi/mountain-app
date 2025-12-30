@@ -12,24 +12,22 @@ body { margin:0; font-family: system-ui, -apple-system, BlinkMacSystemFont, sans
 
 /* ===== コントロール ===== */
 #control{
-  padding:10px;
+  padding:8px 10px;
   background:#f4f4f4;
   font-size:14px;
   display:flex;
   flex-wrap:wrap;
   gap:6px;
 }
-#control b{ margin-right:4px; }
-#control label{ white-space:nowrap; }
 
 /* ===== レイアウト ===== */
-#container{ height:calc(100vh - 120px); position:relative; }
+#container{ height:calc(100vh - 110px); position:relative; }
 #map{ height:100%; width:100%; }
 
 /* ===== リスト ===== */
 #list{
   position:absolute;
-  top:0; right:0;
+  right:0; top:0;
   width:300px; height:100%;
   overflow-y:auto;
   background:#fff;
@@ -37,94 +35,66 @@ body { margin:0; font-family: system-ui, -apple-system, BlinkMacSystemFont, sans
   font-size:13px;
   z-index:1000;
 }
-.list-item{
-  border-bottom:1px solid #ddd;
-  padding:8px;
-  cursor:pointer;
-}
-.list-item:hover{ background:#eef6ff; }
 
-.star{ color:gold; font-weight:bold; }
+/* ===== popup ===== */
+.leaflet-popup-content{
+  max-width:340px;
+}
+.popup h3{
+  margin:0 0 4px;
+  font-size:16px;
+}
 .badge{
   display:inline-block;
-  padding:1px 6px;
-  border-radius:10px;
+  padding:2px 8px;
+  border-radius:12px;
   font-size:11px;
-  margin-left:6px;
-  vertical-align:1px;
 }
-.badge-api{ background:#e7f7ea; border:1px solid #9ad3a5; }
-.badge-dummy{ background:#fff0f0; border:1px solid #e0a3a3; }
+.badge-api{ background:#e7f7ea; }
+.badge-dummy{ background:#fff0f0; }
 
-hr{ border:none; border-top:1px solid #ddd; margin:8px 0; }
-small{ color:#555; }
+hr{ border:none; border-top:1px solid #ddd; margin:6px 0; }
 
-/* ===== popup内の表（根拠付き） ===== */
-.wx-table{
+/* ===== tables ===== */
+table{
   width:100%;
   border-collapse:collapse;
   font-size:12px;
 }
-.wx-table th, .wx-table td{
+th, td{
   border:1px solid #ddd;
-  padding:4px 6px;
+  padding:4px;
   text-align:center;
 }
-.wx-table th{
-  background:#f7f7f7;
+th{ background:#f7f7f7; }
+
+/* ===== fold ===== */
+details summary{
+  cursor:pointer;
   font-weight:600;
-}
-.wx-current{
-  background:#eef6ff;
-  font-weight:700;
+  padding:6px 0;
 }
 
-/* ===== スコア早見表（4日×6枠） ===== */
-.score-grid{
-  width:100%;
-  border-collapse:collapse;
-  font-size:12px;
-  table-layout:fixed;
-}
-.score-grid th, .score-grid td{
-  border:1px solid #ddd;
-  padding:4px 0;
-  text-align:center;
-}
-.score-grid th{
-  background:#f7f7f7;
-  font-weight:600;
-}
-.score-grid .sel{
-  outline:2px solid #5aa7ff;
-  outline-offset:-2px;
-  font-weight:800;
-  background:#eef6ff;
-}
-.score-grid .a{ background:#eaf7ee; }
-.score-grid .b{ background:#fff7db; }
-.score-grid .c{ background:#ffe7e7; }
-
-/* ===== スマホ対応 ===== */
+/* ===== スマホ最適化 ===== */
 @media (max-width:768px){
   #list{
     width:100%;
-    height:45%;
+    height:42%;
     bottom:0; top:auto;
     border-left:none;
     border-top:1px solid #ccc;
   }
   .leaflet-popup-content{
-    font-size:15px;
+    font-size:14px;
     line-height:1.5;
   }
-  .wx-table{ font-size:13px; }
-  .score-grid{ font-size:13px; }
+  table{ font-size:13px; }
 }
 </style>
 </head>
 
 <body>
+
 <div id="control">
   <b>日付</b>
   <select id="day">
@@ -134,21 +104,9 @@ small{ color:#555; }
     <option value="3">3日後</option>
   </select>
 
-  <b>時間帯</b>
+  <b>時間</b>
   <input type="range" id="timeSlider" min="0" max="5" value="0">
   <span id="timeLabel">06–08</span>
-
-  <b>天気</b>
-  <label><input type="checkbox" value="A" checked>A</label>
-  <label><input type="checkbox" value="B" checked>B</label>
-  <label><input type="checkbox" value="C" checked>C</label>
-
-  <b>難易度</b>
-  <label><input type="checkbox" value="初級" checked>初級</label>
-  <label><input type="checkbox" value="中級" checked>中級</label>
-  <label><input type="checkbox" value="上級" checked>上級</label>
-
-  <label><input type="checkbox" id="goodOnly"> 登れる山だけ</label>
 </div>
 
 <div id="container">
@@ -162,362 +120,64 @@ small{ color:#555; }
 import mountains from "./mountains.js";
 import { generateWeatherScore } from "./weather.js";
 
-window.mountains = mountains; // Console確認用
-
-/* ===== 時間帯 ===== */
 const timeSlots = ["06:00","08:00","10:00","12:00","14:00","16:00"];
 const timeLabels = ["06–08","08–10","10–12","12–14","14–16","16–18"];
 
 const slider = document.getElementById("timeSlider");
 const timeLabel = document.getElementById("timeLabel");
+slider.oninput = () => timeLabel.textContent = timeLabels[slider.value];
+const getSelectedTime = () => timeSlots[slider.value];
 
-/* ★今開いているポップアップを保持 */
-let openedMarker = null;
-
-slider.oninput = () => {
-  timeLabel.textContent = timeLabels[slider.value];
-  updateView(); // 再生成せず更新
-};
-const getSelectedTime = () => timeSlots[Number(slider.value)];
-
-/* ===== 日付キー ===== */
-function getDateKey(offset){
-  const d = new Date();
-  d.setDate(d.getDate() + offset);
-  return d.toISOString().slice(0, 10);
+function getDateKey(d){
+  const t = new Date();
+  t.setDate(t.getDate()+d);
+  return t.toISOString().slice(0,10);
 }
-const dayTitles = ["今日","1日後","2日後","3日後"];
 
-/* ===== 地図 ===== */
-const map = L.map("map").setView([36.5, 138], 5);
-
-L.tileLayer(
-  "https://cyberjapandata.gsi.go.jp/xyz/hillshademap/{z}/{x}/{y}.png",
-  { opacity: 0.5, attribution:"地理院 陰影" }
-).addTo(map);
-
-L.tileLayer(
-  "https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png",
-  { opacity: 0.85, attribution:"地理院 地図" }
-).addTo(map);
+const map = L.map("map").setView([36.5,138],5);
+L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png").addTo(map);
 
 const markerLayer = L.layerGroup().addTo(map);
 
-/* ===== アイコン ===== */
-const icon = color => L.icon({
-  iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-${color}.png`,
-  shadowUrl: "https://unpkg.com/leaflet/dist/images/marker-shadow.png",
-  iconSize: [25,41],
-  iconAnchor: [12,41]
-});
-const icons = { A:icon("green"), B:icon("yellow"), C:icon("red") };
-const scorePriority = { A:3, B:2, C:1 };
-
-/* ===== 根拠取得 ===== */
-function getDetail(m, dateKey, time){
-  const d = m.weather?._details?.[dateKey]?.[time];
-  return d || null;
-}
-function fmt(n, digits=1){
-  if (n === null || n === undefined) return "-";
-  const v = Number(n);
-  if (!Number.isFinite(v)) return "-";
-  return v.toFixed(digits);
-}
-function escapeHtml(str){
-  return String(str)
-    .replaceAll("&","&amp;")
-    .replaceAll("<","&lt;")
-    .replaceAll(">","&gt;")
-    .replaceAll('"',"&quot;")
-    .replaceAll("'","&#39;");
-}
-
-/* ===== スコア早見表（4×6） ===== */
-function scoreCellClass(score){
-  if (score === "A") return "a";
-  if (score === "B") return "b";
-  if (score === "C") return "c";
-  return "";
-}
-function buildScoreGridHtml(m, selDay, selTime){
-  const head = `
-    <thead>
-      <tr>
-        <th style="width:14%"></th>
-        ${timeLabels.map(l => `<th>${l}</th>`).join("")}
-      </tr>
-    </thead>
-  `;
-
-  const bodyRows = [];
-  for (let d = 0; d <= 3; d++){
-    const dk = getDateKey(d);
-    const tds = timeSlots.map(t => {
-      const s = m.weather?.[dk]?.[t] ?? "-";
-      const base = scoreCellClass(s);
-      const sel = (d === selDay && t === selTime) ? "sel" : "";
-      return `<td class="${base} ${sel}">${s}</td>`;
-    }).join("");
-    bodyRows.push(`<tr><th>${dayTitles[d]}</th>${tds}</tr>`);
-  }
-
-  return `
-    <b>スコア早見表（今日〜3日後 × 全時間帯）</b><br>
-    <table class="score-grid">
-      ${head}
-      <tbody>${bodyRows.join("")}</tbody>
-    </table>
-    <small>※ 選択中の日付×時間は枠線で強調</small>
-  `;
-}
-
-/* ===== ベスト時間（その日内のtimeSlotsだけで評価）===== */
-function getBestTime(weather, dateKey){
-  const w = weather?.[dateKey];
-  if (!w) return null;
-
-  let best = null;
-  for (const t of timeSlots) {
-    const s = w[t];
-    if (!s) continue;
-    if (!best || scorePriority[s] > scorePriority[best.score]) best = { time:t, score:s };
-  }
-  return best;
-}
-
-/* ===== ポップアップHTML ===== */
-function popupHtml(m, selectedTime){
-  const meta = m.weather?._meta;
-  const isApi = meta?.source === "api";
-  const badgeClass = isApi ? "badge-api" : "badge-dummy";
-  const srcText = isApi ? "API" : "DUMMY";
-  const reason = (!isApi && meta?.reason) ? `<br><small>取得失敗: ${escapeHtml(meta.reason)}</small>` : "";
-
+function popupHtml(m){
   const day = Number(document.getElementById("day").value);
-  const dateKey = getDateKey(day);
-
-  const grid = buildScoreGridHtml(m, day, selectedTime);
-
-  const rows = timeSlots.map((t, idx) => {
-    const s = m.weather?.[dateKey]?.[t] ?? "-";
-    const d = getDetail(m, dateKey, t);
-    const cls = (t === selectedTime) ? "wx-current" : "";
-    return `
-      <tr class="${cls}">
-        <td>${timeLabels[idx]}</td>
-        <td><b>${s}</b></td>
-        <td>${d ? fmt(d.precipitation,1) : "-"}</td>
-        <td>${d ? fmt(d.windspeed,1) : "-"}</td>
-        <td>${d ? fmt(d.gust,1) : "-"}</td>
-        <td>${d ? fmt(d.temp,1) : "-"}</td>
-      </tr>
-    `;
-  }).join("");
-
-  const dayTable = `
-    <b>${dayTitles[day]}（${dateKey}）時間帯別</b><br>
-    <table class="wx-table">
-      <thead>
-        <tr>
-          <th>時間</th><th>判定</th><th>降水(mm)</th><th>風(m/s)</th><th>突風(m/s)</th><th>気温(℃)</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <small>※ DUMMY / データ不足の枠は「-」表示</small>
-  `;
-
-  const lines = [];
-  for (let d = 0; d <= 3; d++) {
-    const dk = getDateKey(d);
-    const s = m.weather?.[dk]?.[selectedTime] ?? "-";
-    const di = getDetail(m, dk, selectedTime);
-
-    const extra = di
-      ? `（降水 ${fmt(di.precipitation,1)}mm / 風 ${fmt(di.windspeed,1)}m/s / 突風 ${fmt(di.gust,1)}m/s / 気温 ${fmt(di.temp,1)}℃）`
-      : "";
-
-    lines.push(`${dayTitles[d]}（${dk}）：<b>${s}</b> ${extra}`);
-  }
-
-  let bestDay = null;
-  for (let d = 0; d <= 3; d++) {
-    const dk = getDateKey(d);
-    const s = m.weather?.[dk]?.[selectedTime];
-    if (!s) continue;
-    if (!bestDay || scorePriority[s] > scorePriority[bestDay.score]) bestDay = { date: dk, day: dayTitles[d], score: s };
-  }
+  const time = getSelectedTime();
+  const score = m.weather?.[getDateKey(day)]?.[time] ?? "-";
 
   return `
     <div class="popup">
-      <b>${escapeHtml(m.name)}</b>
-      <span class="badge ${badgeClass}">${srcText}</span><br>
-      標高：${m.elev} m<br>
-      難易度：${escapeHtml(m.level)}<br>
+      <h3>${m.name}</h3>
+      <span class="badge ${m.weather._meta?.source==="api"?"badge-api":"badge-dummy"}">
+        ${m.weather._meta?.source?.toUpperCase() || "DUMMY"}
+      </span>
 
       <hr>
-      ${grid}
+      <b>おすすめ</b><br>
+      ${day===0?"今日":"+"+day+"日"} ${timeLabels[slider.value]}：<b>${score}</b>
 
-      <hr>
-      ${dayTable}
-
-      <hr>
-      <b>${selectedTime} の天気（今日〜3日後）</b><br>
-      ${lines.join("<br>")}
-
-      <hr>
-      <b>おすすめ：</b>
-      ${bestDay ? `${bestDay.day}（${bestDay.date} / ${bestDay.score}）` : "判定不可"}
-      ${reason}
+      <details>
+        <summary>スコア早見表</summary>
+        <table>
+          <tr><th></th>${timeLabels.map(t=>`<th>${t}</th>`).join("")}</tr>
+          ${[0,1,2,3].map(d=>`
+            <tr>
+              <th>${d===0?"今日":"+"+d+"日"}</th>
+              ${timeSlots.map(t=>`<td>${m.weather?.[getDateKey(d)]?.[t]||"-"}</td>`).join("")}
+            </tr>
+          `).join("")}
+        </table>
+      </details>
     </div>
   `;
 }
 
-/* ===== リスト描画 ===== */
-function drawList(items, day){
-  const list = document.getElementById("list");
-  list.innerHTML = `<b>${dayTitles[day]}に登れる山</b><br>`;
-
-  items.forEach(({ m, best, marker }) => {
-    const meta = m.weather?._meta;
-    const isApi = meta?.source === "api";
-    const badgeClass = isApi ? "badge-api" : "badge-dummy";
-    const srcText = isApi ? "API" : "DUMMY";
-
-    const div = document.createElement("div");
-    div.className = "list-item";
-    div.innerHTML = `
-      <b>${escapeHtml(m.name)}</b>
-      ${best?.score==="A" ? "<span class='star'>★</span>" : ""}
-      <span class="badge ${badgeClass}">${srcText}</span><br>
-      標高:${m.elev}m / ${escapeHtml(m.level)}<br>
-      ベスト:${best ? `${best.time}（${best.score}）` : "-"}
-    `;
-    div.onclick = () => {
-      map.setView([m.lat, m.lng], 11);
-      marker.openPopup();
-    };
-    list.appendChild(div);
-  });
-}
-
-/* ===== マーカーは作り直さない ===== */
-const markerEntries = []; // { m, marker, shown }
-
-/* ===== 画面状態（フィルタ取得） ===== */
-function getState(){
-  const day = Number(document.getElementById("day").value);
-  const time = getSelectedTime();
-  const dateKey = getDateKey(day);
-  const goodOnly = document.getElementById("goodOnly").checked;
-
-  const scores = [...document.querySelectorAll(
-    'input[value="A"]:checked,input[value="B"]:checked,input[value="C"]:checked'
-  )].map(e => e.value);
-
-  const levels = [...document.querySelectorAll(
-    'input[value="初級"]:checked,input[value="中級"]:checked,input[value="上級"]:checked'
-  )].map(e => e.value);
-
-  return { day, time, dateKey, goodOnly, scores, levels };
-}
-
-/* ===== ビュー更新（ポップアップ維持） ===== */
-function updateView(){
-  const { day, time, dateKey, goodOnly, scores, levels } = getState();
-  const items = [];
-
-  // 開いているマーカーを、更新後に復帰させるため保持
-  const reopenTarget = openedMarker;
-
-  for (const entry of markerEntries){
-    const m = entry.m;
-    const marker = entry.marker;
-
-    const score = m.weather?.[dateKey]?.[time];
-    const pass =
-      !!score &&
-      scores.includes(score) &&
-      levels.includes(m.level) &&
-      !(goodOnly && (score !== "A" || m.level === "上級"));
-
-    if (pass){
-      if (!entry.shown){
-        markerLayer.addLayer(marker);
-        entry.shown = true;
-      }
-
-      // ★ポップアップ開いてる間は setIcon しない（閉じる原因になりがち）
-      const isOpenNow = marker.isPopupOpen && marker.isPopupOpen();
-      if (!isOpenNow) {
-        marker.setIcon(icons[score]);
-      }
-
-      // ポップアップ内容更新（開いていれば即反映）
-      const newHtml = popupHtml(m, time);
-      const pop = marker.getPopup();
-      if (pop) pop.setContent(newHtml);
-      else marker.bindPopup(newHtml);
-
-      const best = getBestTime(m.weather, dateKey);
-      items.push({ m, best, marker });
-    } else {
-      // フィルタで消える場合：開いてたやつなら保持を解除
-      if (reopenTarget === marker) openedMarker = null;
-
-      if (entry.shown){
-        markerLayer.removeLayer(marker);
-        entry.shown = false;
-      }
-    }
+(async()=>{
+  for(const m of mountains){
+    m.weather = await generateWeatherScore(m.name,m.lat,m.lng);
+    const marker = L.marker([m.lat,m.lng]).addTo(markerLayer);
+    marker.bindPopup(popupHtml(m));
   }
-
-  drawList(items, day);
-
-  // ★更新で閉じた場合でも、同じマーカーを即 reopen
-  if (reopenTarget && markerLayer.hasLayer(reopenTarget)) {
-    // content更新が先に入るように、ほんの少し遅延
-    setTimeout(() => {
-      if (!reopenTarget.isPopupOpen()) reopenTarget.openPopup();
-    }, 0);
-  }
-
-  setTimeout(() => map.invalidateSize(), 100);
-}
-
-/* ===== 初期化 ===== */
-async function init(){
-  await Promise.all(mountains.map(async m => {
-    if (!m.weather || Object.keys(m.weather).length === 0) {
-      m.weather = await generateWeatherScore(m.name, m.lat, m.lng);
-    }
-  }));
-
-  for (const m of mountains){
-    const marker = L.marker([m.lat, m.lng], { icon: icons["C"] }); // 仮
-    marker.bindPopup(popupHtml(m, getSelectedTime()));
-
-    // ★開いてるポップアップを追跡
-    marker.on("popupopen", () => { openedMarker = marker; });
-    marker.on("popupclose", () => {
-      if (openedMarker === marker) openedMarker = null;
-    });
-
-    markerEntries.push({ m, marker, shown:false });
-  }
-
-  document.querySelectorAll("#control input,#control select")
-    .forEach(e => e.addEventListener("change", updateView));
-
-  const apiCount = mountains.filter(m => m.weather?._meta?.source === "api").length;
-  const dummyCount = mountains.length - apiCount;
-  console.log(`weather sources: api=${apiCount}, dummy=${dummyCount}`);
-
-  updateView();
-}
-
-init();
+})();
 </script>
 
 </body>
