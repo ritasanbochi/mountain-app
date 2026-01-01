@@ -1,16 +1,17 @@
-// weather.js (tenkura-like, precip-primary, elevation-adjust, v7)
+// weather.js (tenkura-like, precip-primary, elevation-adjust, mid+summit, v8)
 //
 // 追加方針（てんくら寄せ）
 // - Open-Meteo に &elevation= を渡す（統計的ダウンスケーリング用）
-// - さらに「山の標高」に合わせて temp/wind を自前補正して表示・判定に使う
+// - 「山頂」と「中腹(50%)」の2段で temp/wind/gust を補正して表示
+// - スコアは山頂（安全側）で判定
 //
-// 注意：これは“近似”。てんくらのような山岳専用モデルそのものではない。
+// index.html 側は generateWeatherScore(name, lat, lng, level, elevM) を呼ぶ前提。
 
 const OPEN_METEO_ENDPOINT = "https://api.open-meteo.com/v1/forecast";
 const TIMEZONE = "Asia/Tokyo";
 
 // キャッシュ
-const CACHE_PREFIX = "mount_weather_v7_"; // ★ v7
+const CACHE_PREFIX = "mount_weather_v8_"; // ★ v8: 旧キャッシュ無効化
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1時間
 
 // UI時間帯（index.htmlと合わせる）
@@ -27,7 +28,7 @@ function dateKeyLocal(d){
 function isoNow(){ return new Date().toISOString(); }
 function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
 
-// ===== スコア判定（前回の “降水主軸・風/気温は補助” を維持） =====
+// ===== スコア判定（降水主軸・風/気温は補助） =====
 function thresholdsByLevel(level){
   const base = {
     rainA: 1.0, rainB: 4.0,
@@ -73,15 +74,15 @@ function applyTempSupport(score, temp, th){
   if (temp <= th.tempWarn && score === "A") return "B";
   return score;
 }
-function scoreWithComponents(level, metrics){
+function scoreBySummit(level, summitMetrics){
   const th = thresholdsByLevel(level);
-  let s = baseScoreByPrecip(metrics.precipitation, th);
-  s = applyWindSupport(s, metrics.windspeed, metrics.gust, th);
-  s = applyTempSupport(s, metrics.temp, th);
+  let s = baseScoreByPrecip(summitMetrics.precipitation, th);
+  s = applyWindSupport(s, summitMetrics.windspeed, summitMetrics.gust, th);
+  s = applyTempSupport(s, summitMetrics.temp, th);
   return { score: s, thresholds: th };
 }
 
-// ===== 標高補正（ここが今回の追加） =====
+// ===== 標高補正（山頂/中腹） =====
 // 気温減率：6.5℃/1000m（標準大気の目安）
 const LAPSE_C_PER_1000M = 6.5;
 
@@ -93,32 +94,37 @@ function windExposureFactor(deltaElevM){
   return clamp(k, 1.0, 1.30);
 }
 
-function adjustByElevation(raw, targetElevM, apiElevM){
+function adjustToElevation(raw, targetElevM, apiElevM){
   // raw: { precipitation, windspeed, gust, temp }
-  if (!raw) return null;
-
   const tgt = toNumber(targetElevM);
   const api = toNumber(apiElevM);
 
-  // 標高情報がない場合はそのまま
-  if (tgt === null || api === null) return { ...raw, _elev: { target: tgt, api: api, delta: null } };
+  const out = { ...raw };
 
-  const delta = tgt - api; // +なら山の方が高い
-  const adj = { ...raw };
-
-  // 気温：高いほど下がる（deltaが+なら tempを下げる）
-  if (adj.temp !== null) {
-    adj.temp = adj.temp - (LAPSE_C_PER_1000M * (delta / 1000));
+  if (tgt === null || api === null) {
+    out._elev = { target: tgt, api: api, delta: null };
+    return out;
   }
 
-  // 風：高いほど露出が増える想定で“控えめに”上げる
+  const delta = tgt - api; // +なら山の方が高い
+  if (out.temp !== null) {
+    out.temp = out.temp - (LAPSE_C_PER_1000M * (delta / 1000));
+  }
+
   const f = windExposureFactor(delta);
-  if (adj.windspeed !== null) adj.windspeed = adj.windspeed * f;
-  if (adj.gust !== null)      adj.gust      = adj.gust * f;
+  if (out.windspeed !== null) out.windspeed = out.windspeed * f;
+  if (out.gust !== null)      out.gust      = out.gust * f;
 
-  adj._elev = { target: tgt, api: api, delta };
+  out._elev = { target: tgt, api: api, delta };
+  return out;
+}
 
-  return adj;
+function calcMidElevation(summitElevM, apiElevM){
+  const s = toNumber(summitElevM);
+  const api = toNumber(apiElevM);
+  if (s === null) return null;
+  if (api === null) return Math.round(s * 0.5);
+  return Math.round(api + (s - api) * 0.5);
 }
 
 // ===== Open-Meteo取得 =====
@@ -131,7 +137,7 @@ async function fetchOpenMeteo(lat, lng, elevationM){
     timezone: TIMEZONE
   });
 
-  // ★ 標高を渡す（Open-Meteoの downscaling 用）
+  // ★ 標高を渡す
   if (Number.isFinite(Number(elevationM))) {
     params.set("elevation", String(Math.round(Number(elevationM))));
   }
@@ -157,9 +163,11 @@ function pickAtHour(hourly, wantIso){
   };
 }
 
-function buildFromHourly(name, lat, lng, level, hourly, targetElevM, apiElevM){
+function buildFromHourly(name, lat, lng, level, hourly, summitElevM, apiElevM){
   const out = {};
   const details = {};
+
+  const midElevM = calcMidElevation(summitElevM, apiElevM);
 
   for (let d = 0; d < 4; d++){
     const dt = new Date();
@@ -181,19 +189,43 @@ function buildFromHourly(name, lat, lng, level, hourly, targetElevM, apiElevM){
         continue;
       }
 
-      // ★ 山の標高に合わせて補正した値で判定＆表示
-      const adj = adjustByElevation(raw, targetElevM, apiElevM);
-      const judged = scoreWithComponents(level, adj);
+      // 山頂/中腹の2段を作る
+      const summit = adjustToElevation(raw, summitElevM, apiElevM);
+      const mid    = adjustToElevation(raw, midElevM,    apiElevM);
+
+      // スコアは山頂で判定（安全側）
+      const judged = scoreBySummit(level, summit);
 
       out[dk][slot] = judged.score ?? null;
+
       details[dk][slot] = {
-        ...adj,
+        // 降水は共通（標高補正しない）
+        precipitation: raw.precipitation,
+
+        // 中腹
+        windspeed_mid: mid.windspeed,
+        gust_mid:      mid.gust,
+        temp_mid:      mid.temp,
+
+        // 山頂
+        windspeed_summit: summit.windspeed,
+        gust_summit:      summit.gust,
+        temp_summit:      summit.temp,
+
+        // 内部情報
         _thresholds: judged.thresholds,
+        _elev: {
+          api: toNumber(apiElevM),
+          mid: toNumber(midElevM),
+          summit: toNumber(summitElevM),
+          delta_mid: mid?._elev?.delta ?? null,
+          delta_summit: summit?._elev?.delta ?? null
+        }
       };
     }
   }
 
-  return { out, details };
+  return { out, details, midElevM };
 }
 
 // ===== ダミー（フォールバック） =====
@@ -213,16 +245,18 @@ function mulberry32(a){
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   }
 }
-function dummyWeather(name, lat, lng, level, elevationM, reason){
+function dummyWeather(name, lat, lng, level, summitElevM, reason){
   const out = {};
   const details = {};
   const now = new Date();
   now.setHours(0,0,0,0);
 
-  const seed = hashCode(`${name}_${lat}_${lng}_${level}_${elevationM}`);
+  const seed = hashCode(`${name}_${lat}_${lng}_${level}_${summitElevM}`);
   const rand = mulberry32(seed);
 
-  // ダミーは過激にしない
+  const summit = toNumber(summitElevM);
+  const mid = summit !== null ? Math.round(summit * 0.5) : null;
+
   for (let d = 0; d < 4; d++){
     const dt = new Date(now.getTime());
     dt.setDate(dt.getDate() + d);
@@ -232,18 +266,30 @@ function dummyWeather(name, lat, lng, level, elevationM, reason){
     details[dk] = {};
 
     for (const slot of TIME_SLOTS){
-      const raw = {
-        precipitation: clamp(rand() * 5.5, 0, 8),
-        windspeed:     clamp(rand() * 14, 0, 22),
-        gust:          clamp(rand() * 22, 0, 32),
-        temp:          clamp((rand() * 18) - 2, -12, 22),
-      };
+      const precipitation = clamp(rand() * 5.5, 0, 8);
+      const windRaw = clamp(rand() * 14, 0, 22);
+      const gustRaw = clamp(windRaw + rand()*10, 0, 36);
+      const tempRaw = clamp((rand() * 18) - 2, -12, 22);
 
-      // api標高が不明なので、標高補正は“山標高だけ”で適当に微調整するより、ここではそのまま
-      const judged = scoreWithComponents(level, raw);
+      // ダミーはapi標高が無いので、山頂/中腹の差分は簡易に気温だけ少し下げる程度
+      const tempSummit = (summit !== null) ? (tempRaw - 5) : tempRaw;
+      const tempMid    = (mid !== null) ? (tempRaw - 2.5) : tempRaw;
+
+      const summitMetrics = { precipitation, windspeed: windRaw, gust: gustRaw, temp: tempSummit };
+      const judged = scoreBySummit(level, summitMetrics);
 
       out[dk][slot] = judged.score ?? "B";
-      details[dk][slot] = { ...raw, _thresholds: judged.thresholds, _elev: { target: elevationM ?? null, api: null, delta: null } };
+      details[dk][slot] = {
+        precipitation,
+        windspeed_mid: windRaw,
+        gust_mid: gustRaw,
+        temp_mid: tempMid,
+        windspeed_summit: windRaw,
+        gust_summit: gustRaw,
+        temp_summit: tempSummit,
+        _thresholds: judged.thresholds,
+        _elev: { api: null, mid, summit, delta_mid: null, delta_summit: null }
+      };
     }
   }
 
@@ -255,21 +301,21 @@ function dummyWeather(name, lat, lng, level, elevationM, reason){
       fetchedAt: isoNow(),
       reason: reason || "API取得失敗",
       lat, lng,
-      elevation: Number.isFinite(Number(elevationM)) ? Math.round(Number(elevationM)) : null
+      elevation_summit: summit
     }
   };
 }
 
 // ===== キャッシュ =====
-function cacheKey(lat, lng, elevationM){
+function cacheKey(lat, lng, summitElevM){
   const la = Number(lat).toFixed(3);
   const ln = Number(lng).toFixed(3);
-  const el = Number.isFinite(Number(elevationM)) ? Math.round(Number(elevationM)) : "na";
+  const el = Number.isFinite(Number(summitElevM)) ? Math.round(Number(summitElevM)) : "na";
   return `${CACHE_PREFIX}${la}_${ln}_${el}`;
 }
-function loadCache(lat, lng, elevationM){
+function loadCache(lat, lng, summitElevM){
   try{
-    const key = cacheKey(lat, lng, elevationM);
+    const key = cacheKey(lat, lng, summitElevM);
     const raw = localStorage.getItem(key);
     if (!raw) return null;
     const obj = JSON.parse(raw);
@@ -282,34 +328,29 @@ function loadCache(lat, lng, elevationM){
     return null;
   }
 }
-function saveCache(lat, lng, elevationM, payload){
+function saveCache(lat, lng, summitElevM, payload){
   try{
-    const key = cacheKey(lat, lng, elevationM);
+    const key = cacheKey(lat, lng, summitElevM);
     localStorage.setItem(key, JSON.stringify(payload));
   }catch{}
 }
 
 // ===== 公開API =====
-export async function generateWeatherScore(name, lat, lng, level="中級", elevationM=null){
-  const cached = loadCache(lat, lng, elevationM);
+export async function generateWeatherScore(name, lat, lng, level="中級", summitElevM=null){
+  const cached = loadCache(lat, lng, summitElevM);
   if (cached && cached.out && cached.details && cached.meta) {
     return { ...cached.out, _details: cached.details, _meta: cached.meta };
   }
 
   try{
-    const { json, url } = await fetchOpenMeteo(lat, lng, elevationM);
+    const { json, url } = await fetchOpenMeteo(lat, lng, summitElevM);
 
     const hourly = json?.hourly;
     if (!hourly) throw new Error("Open-Meteo hourly missing");
 
-    // Open-Meteoが返す elevation（APIが使った地表標高）
     const apiElev = toNumber(json?.elevation);
-
-    const { out, details } = buildFromHourly(
-      name, lat, lng, level,
-      hourly,
-      elevationM,
-      apiElev
+    const { out, details, midElevM } = buildFromHourly(
+      name, lat, lng, level, hourly, summitElevM, apiElev
     );
 
     const meta = {
@@ -317,20 +358,21 @@ export async function generateWeatherScore(name, lat, lng, level="中級", eleva
       fetchedAt: isoNow(),
       lat, lng,
       url,
-      elevation_target: Number.isFinite(Number(elevationM)) ? Math.round(Number(elevationM)) : null,
-      elevation_api: apiElev
+      elevation_api: apiElev,
+      elevation_summit: Number.isFinite(Number(summitElevM)) ? Math.round(Number(summitElevM)) : null,
+      elevation_mid: Number.isFinite(Number(midElevM)) ? Math.round(Number(midElevM)) : null
     };
 
     const payload = { out, details, meta, fetchedAt: meta.fetchedAt };
-    saveCache(lat, lng, elevationM, payload);
+    saveCache(lat, lng, summitElevM, payload);
 
     return { ...out, _details: details, _meta: meta };
   }catch(e){
     const reason = (e && e.message) ? e.message : "unknown error";
-    const dummy = dummyWeather(name, lat, lng, level, elevationM, reason);
+    const dummy = dummyWeather(name, lat, lng, level, summitElevM, reason);
 
     const payload = { out: dummy.out, details: dummy.details, meta: dummy.meta, fetchedAt: dummy.meta.fetchedAt };
-    saveCache(lat, lng, elevationM, payload);
+    saveCache(lat, lng, summitElevM, payload);
 
     return { ...dummy.out, _details: dummy.details, _meta: dummy.meta };
   }

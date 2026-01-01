@@ -132,8 +132,8 @@ small{ color:#555; }
     inset:auto;
     top:24px; left:50%;
     transform:translateX(-50%);
-    width:min(920px, calc(100vw - 48px));
-    height:min(86vh, 860px);
+    width:min(980px, calc(100vw - 48px));
+    height:min(86vh, 900px);
     border-radius:14px;
     box-shadow:0 14px 40px rgba(0,0,0,0.24);
   }
@@ -480,6 +480,10 @@ function buildMetaBox(m){
   const lng = (meta.lng ?? m.lng);
   const reason = meta.source === "dummy" && meta.reason ? meta.reason : null;
 
+  const elevApi = (meta.elevation_api ?? null);
+  const elevMid = (meta.elevation_mid ?? null);
+  const elevSummit = (meta.elevation_summit ?? m.elev ?? null);
+
   return `
     <div class="meta-box">
       <div class="meta-line">
@@ -493,6 +497,10 @@ function buildMetaBox(m){
       <div class="meta-line">
         <span>座標</span>
         <span>${Number(lat).toFixed(3)}, ${Number(lng).toFixed(3)}</span>
+      </div>
+      <div class="meta-line">
+        <span>標高</span>
+        <span>API:${elevApi ?? "-"}m / 中腹:${elevMid ?? "-"}m / 山頂:${elevSummit ?? "-" }m</span>
       </div>
       ${reason ? `<div class="meta-line"><span class="meta-warn">取得失敗</span><span class="meta-warn">${escapeHtml(reason)}</span></div>` : ""}
       <small>※ DUMMY はAPI取得失敗時の仮データです</small>
@@ -550,7 +558,7 @@ function getBestTime(weather, dateKey){
   return best;
 }
 
-/* ===== 詳細HTML ===== */
+/* ===== 詳細HTML（中腹/山頂の2段表示） ===== */
 function detailHtml(m, selectedTime){
   const day = Number(daySelect.value);
   const dateKey = getDateKey(day);
@@ -567,15 +575,16 @@ function detailHtml(m, selectedTime){
         <td>${timeLabels[idx]}</td>
         <td><b>${s ?? "-"}</b></td>
         <td>${d ? fmt(d.precipitation,1) : "-"}</td>
-        <td>${d ? fmt(d.windspeed,1) : "-"}</td>
-        <td>${d ? fmt(d.gust,1) : "-"}</td>
-        <td>${d ? fmt(d.temp,1) : "-"}</td>
+        <td>${d ? `${fmt(d.windspeed_mid,1)} / ${fmt(d.windspeed_summit,1)}` : "-"}</td>
+        <td>${d ? `${fmt(d.gust_mid,1)} / ${fmt(d.gust_summit,1)}` : "-"}</td>
+        <td>${d ? `${fmt(d.temp_mid,1)} / ${fmt(d.temp_summit,1)}` : "-"}</td>
       </tr>
     `;
   }).join("");
 
   const dayTable = `
     <b>${escapeHtml(dayLabel(day))}（${dateKey}）時間帯別</b><br>
+    <small>※ 風/突風/気温は「中腹 / 山頂」</small><br>
     <table class="wx-table">
       <thead>
         <tr>
@@ -584,7 +593,6 @@ function detailHtml(m, selectedTime){
       </thead>
       <tbody>${rows}</tbody>
     </table>
-    <small>※ DUMMY / データ不足の枠は「-」表示</small>
   `;
 
   const lines = [];
@@ -593,7 +601,7 @@ function detailHtml(m, selectedTime){
     const s = m.weather?.[dk]?.[selectedTime] ?? "-";
     const di = getDetail(m, dk, selectedTime);
     const extra = di
-      ? `（降水 ${fmt(di.precipitation,1)}mm / 風 ${fmt(di.windspeed,1)}m/s / 突風 ${fmt(di.gust,1)}m/s / 気温 ${fmt(di.temp,1)}℃）`
+      ? `（降水 ${fmt(di.precipitation,1)}mm / 風 ${fmt(di.windspeed_mid,1)}→${fmt(di.windspeed_summit,1)}m/s / 突風 ${fmt(di.gust_mid,1)}→${fmt(di.gust_summit,1)}m/s / 気温 ${fmt(di.temp_mid,1)}→${fmt(di.temp_summit,1)}℃）`
       : "";
     lines.push(`${escapeHtml(dayLabel(d))}：<b>${s ?? "-"}</b> ${extra}`);
   }
@@ -837,10 +845,10 @@ function updateView(){
 async function init(){
   initDaySelectLabels();
 
-  // 初期：今日なら最寄り枠
   if (Number(daySelect.value) === 0) setSliderIndex(nearestTimeSlotIndexNow());
   else setSliderIndex(Number(slider.value));
 
+  // ★ 山の標高 m.elev を渡す（山頂）
   await Promise.all(mountains.map(async m => {
     if (!m.weather || Object.keys(m.weather).length === 0) {
       m.weather = await generateWeatherScore(m.name, m.lat, m.lng, m.level, m.elev);
@@ -856,7 +864,6 @@ async function init(){
     markerEntries.push({ m, marker, shown:false });
   }
 
-  // daySelect は専用ハンドラを付けているので除外
   document.querySelectorAll("#control input,#control select")
     .forEach(e => {
       if (e === daySelect) return;
