@@ -843,7 +843,7 @@ async function init(){
 
   await Promise.all(mountains.map(async m => {
     if (!m.weather || Object.keys(m.weather).length === 0) {
-      m.weather = await generateWeatherScore(m.name, m.lat, m.lng, m.level);
+      m.weather = await generateWeatherScore(m.name, m.lat, m.lng, m.level, m.elev);
     }
   }));
 
