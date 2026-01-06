@@ -1,17 +1,17 @@
-// weather.js (tenkura-like, precip-primary, elevation-adjust, mid+summit, v8)
+// weather.js (tenkura-like, precip-primary, elevation-adjust, mid+summit, v9)
 //
-// 追加方針（てんくら寄せ）
-// - Open-Meteo に &elevation= を渡す（統計的ダウンスケーリング用）
-// - 「山頂」と「中腹(50%)」の2段で temp/wind/gust を補正して表示
-// - スコアは山頂（安全側）で判定
+// 修正点(v9):
+// - Open-Meteo へのリクエストに elevation= を渡さない
+//   → json.elevation を「地表/モデル側の標高」として使い、中腹/山頂補正の基準にする
+// - これにより「中腹」と「山頂」が同じ値になる問題を解消
 //
-// index.html 側は generateWeatherScore(name, lat, lng, level, elevM) を呼ぶ前提。
+// スコアは山頂（安全側）で判定。表示は中腹/山頂の2段。
 
 const OPEN_METEO_ENDPOINT = "https://api.open-meteo.com/v1/forecast";
 const TIMEZONE = "Asia/Tokyo";
 
 // キャッシュ
-const CACHE_PREFIX = "mount_weather_v8_"; // ★ v8: 旧キャッシュ無効化
+const CACHE_PREFIX = "mount_weather_v9_"; // ★ v9
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1時間
 
 // UI時間帯（index.htmlと合わせる）
@@ -86,8 +86,7 @@ function scoreBySummit(level, summitMetrics){
 // 気温減率：6.5℃/1000m（標準大気の目安）
 const LAPSE_C_PER_1000M = 6.5;
 
-// 風補正：やりすぎ防止の控えめ補正（標高差が大きいと少し増やす）
-// - 標高差 1000m で +15% 程度、最大 +30% で頭打ち
+// 風補正：控えめ（標高差1000mで+15%、最大+30%）
 function windExposureFactor(deltaElevM){
   if (!Number.isFinite(deltaElevM)) return 1.0;
   const k = 1.0 + 0.15 * (deltaElevM / 1000);
@@ -95,12 +94,12 @@ function windExposureFactor(deltaElevM){
 }
 
 function adjustToElevation(raw, targetElevM, apiElevM){
-  // raw: { precipitation, windspeed, gust, temp }
   const tgt = toNumber(targetElevM);
   const api = toNumber(apiElevM);
 
   const out = { ...raw };
 
+  // api標高が取れないときは補正不能（そのまま）
   if (tgt === null || api === null) {
     out._elev = { target: tgt, api: api, delta: null };
     return out;
@@ -128,7 +127,8 @@ function calcMidElevation(summitElevM, apiElevM){
 }
 
 // ===== Open-Meteo取得 =====
-async function fetchOpenMeteo(lat, lng, elevationM){
+// ★ v9: elevation= を渡さない
+async function fetchOpenMeteo(lat, lng){
   const params = new URLSearchParams({
     latitude: String(lat),
     longitude: String(lng),
@@ -136,11 +136,6 @@ async function fetchOpenMeteo(lat, lng, elevationM){
     forecast_days: "4",
     timezone: TIMEZONE
   });
-
-  // ★ 標高を渡す
-  if (Number.isFinite(Number(elevationM))) {
-    params.set("elevation", String(Math.round(Number(elevationM))));
-  }
 
   const url = `${OPEN_METEO_ENDPOINT}?${params.toString()}`;
   const res = await fetch(url);
@@ -189,7 +184,7 @@ function buildFromHourly(name, lat, lng, level, hourly, summitElevM, apiElevM){
         continue;
       }
 
-      // 山頂/中腹の2段を作る
+      // 山頂/中腹を補正して作る
       const summit = adjustToElevation(raw, summitElevM, apiElevM);
       const mid    = adjustToElevation(raw, midElevM,    apiElevM);
 
@@ -199,7 +194,6 @@ function buildFromHourly(name, lat, lng, level, hourly, summitElevM, apiElevM){
       out[dk][slot] = judged.score ?? null;
 
       details[dk][slot] = {
-        // 降水は共通（標高補正しない）
         precipitation: raw.precipitation,
 
         // 中腹
@@ -212,7 +206,6 @@ function buildFromHourly(name, lat, lng, level, hourly, summitElevM, apiElevM){
         gust_summit:      summit.gust,
         temp_summit:      summit.temp,
 
-        // 内部情報
         _thresholds: judged.thresholds,
         _elev: {
           api: toNumber(apiElevM),
@@ -271,7 +264,6 @@ function dummyWeather(name, lat, lng, level, summitElevM, reason){
       const gustRaw = clamp(windRaw + rand()*10, 0, 36);
       const tempRaw = clamp((rand() * 18) - 2, -12, 22);
 
-      // ダミーはapi標高が無いので、山頂/中腹の差分は簡易に気温だけ少し下げる程度
       const tempSummit = (summit !== null) ? (tempRaw - 5) : tempRaw;
       const tempMid    = (mid !== null) ? (tempRaw - 2.5) : tempRaw;
 
@@ -343,12 +335,14 @@ export async function generateWeatherScore(name, lat, lng, level="中級", summi
   }
 
   try{
-    const { json, url } = await fetchOpenMeteo(lat, lng, summitElevM);
+    const { json, url } = await fetchOpenMeteo(lat, lng);
 
     const hourly = json?.hourly;
     if (!hourly) throw new Error("Open-Meteo hourly missing");
 
+    // ★ APIが返す地表標高（モデル/格子側の標高）
     const apiElev = toNumber(json?.elevation);
+
     const { out, details, midElevM } = buildFromHourly(
       name, lat, lng, level, hourly, summitElevM, apiElev
     );
