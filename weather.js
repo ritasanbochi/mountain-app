@@ -4,6 +4,7 @@
 // - 月(季節)で baseline を可変にして、冬の厳しさ/夏の緩さを自然に反映
 
 const OPEN_METEO_ENDPOINT = "https://api.open-meteo.com/v1/forecast";
+const OPEN_METEO_GEOCODE = "https://geocoding-api.open-meteo.com/v1/search";
 const TIMEZONE = "Asia/Tokyo";
 
 // キャッシュ
@@ -23,6 +24,87 @@ function dateKeyLocal(d){
 }
 function isoNow(){ return new Date().toISOString(); }
 function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
+
+// =====================================================
+// 0) 追加山向け：Open-Meteo Geocoding（山名→緯度経度/標高）
+// =====================================================
+
+function normalizeNameForGeocode(name){
+  // よくある表記ゆれの軽い補正（必要なら増やしてOK）
+  return String(name)
+    .replaceAll("ヶ", "ケ")
+    .trim();
+}
+
+async function geocodeOnce(query){
+  const params = new URLSearchParams({
+    name: query,
+    count: "10",
+    language: "ja",
+    format: "json"
+  });
+  const url = `${OPEN_METEO_GEOCODE}?${params.toString()}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Geocoding HTTP ${res.status}`);
+  const json = await res.json();
+  return { json, url };
+}
+
+function pickBestJapanResult(results){
+  if (!Array.isArray(results) || results.length === 0) return null;
+
+  // 1) まず country_code === "JP" を優先
+  const jp = results.filter(r => String(r?.country_code || "").toUpperCase() === "JP");
+  const pool = jp.length ? jp : results;
+
+  // 2) elevation があるものを優先
+  const withElev = pool.filter(r => Number.isFinite(Number(r?.elevation)));
+  const pool2 = withElev.length ? withElev : pool;
+
+  // 3) 先頭（関連度順のはず）
+  return pool2[0] || null;
+}
+
+/**
+ * 山名から緯度経度・標高を推定して返す。
+ * - 成功時：{ lat, lng, elev, _geocodeUrl }
+ * - 失敗時：null
+ */
+export async function geocodeMountain(name){
+  const base = normalizeNameForGeocode(name);
+  const candidates = [
+    `${base} 山`,
+    `${base} 岳`,
+    `${base}`,
+    `${base} 日本`,
+  ];
+
+  let lastErr = null;
+  for (const q of candidates){
+    try{
+      const { json, url } = await geocodeOnce(q);
+      const best = pickBestJapanResult(json?.results);
+      if (!best) continue;
+      const lat = Number(best.latitude);
+      const lng = Number(best.longitude);
+      const elev = Number(best.elevation);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+      return {
+        lat,
+        lng,
+        elev: Number.isFinite(elev) ? Math.round(elev) : null,
+        _geocodeUrl: url,
+        _geocodeName: String(best.name || q),
+        _geocodeCountry: String(best.country || ""),
+      };
+    }catch(e){
+      lastErr = e;
+    }
+  }
+
+  if (lastErr) console.warn("geocodeMountain failed:", name, lastErr);
+  return null;
+}
 
 // =====================================================
 // 1) 地域×標高帯×月 の「基準（その山のふつう）」
@@ -519,10 +601,13 @@ function loadCache(lat, lng, summitElevM){
     const raw = localStorage.getItem(key);
     if (!raw) return null;
     const obj = JSON.parse(raw);
-    if (!obj || !obj.fetchedAt) return null;
-    const t = new Date(obj.fetchedAt).getTime();
-    if (!Number.isFinite(t)) return null;
-    if (Date.now() - t > CACHE_TTL_MS) return null;
+
+    const fetchedAt = obj?.fetchedAt;
+    if (!fetchedAt) return null;
+    const ts = Date.parse(fetchedAt);
+    if (!Number.isFinite(ts)) return null;
+    if (Date.now() - ts > CACHE_TTL_MS) return null;
+
     return obj;
   }catch{
     return null;
@@ -532,15 +617,17 @@ function saveCache(lat, lng, summitElevM, payload){
   try{
     const key = cacheKey(lat, lng, summitElevM);
     localStorage.setItem(key, JSON.stringify(payload));
-  }catch{}
+  }catch{
+    // ignore
+  }
 }
 
 // =====================================================
-// 8) 公開API
+// 8) メイン：山のスコア生成
 // =====================================================
 export async function generateWeatherScore(name, lat, lng, level="中級", summitElevM=null){
   const cached = loadCache(lat, lng, summitElevM);
-  if (cached && cached.out && cached.details && cached.meta) {
+  if (cached){
     return { ...cached.out, _details: cached.details, _meta: cached.meta };
   }
 
