@@ -325,7 +325,7 @@ small{ color:#555; }
 
 <script type="module">
 import mountains from "./mountains.js";
-import { MOUNTAIN_SETS, GEO_OVERRIDES } from "./mountaimSets.js";
+import { loadSetNames, SET_DEFS, GEO_OVERRIDES } from "./mountaimSets.js";
 import { generateWeatherScore, geocodeMountain } from "./weather.js";
 
 /* ===== 時間帯 ===== */
@@ -345,22 +345,17 @@ function nearestTimeSlotIndexNow(){
   let bestDiff = Infinity;
   starts.forEach((min, idx) => {
     const diff = Math.abs(nowMin - min);
-    if (diff < bestDiff) {
-      bestDiff = diff;
-      bestIdx = idx;
-    }
+    if (diff < bestDiff) { bestDiff = diff; bestIdx = idx; }
   });
 
   if (nowMin < starts[0]) return 0;
   if (nowMin > starts[starts.length - 1] + 120) return starts.length - 1;
   return bestIdx;
 }
-
 function setSliderIndex(idx){
   slider.value = String(idx);
   timeLabel.textContent = timeLabels[idx];
 }
-
 slider.oninput = () => {
   timeLabel.textContent = timeLabels[Number(slider.value)];
   updateView();
@@ -434,60 +429,146 @@ const icons = { A:icon("green"), B:icon("yellow"), C:icon("red") };
 const scorePriority = { A:3, B:2, C:1 };
 
 /* =====================================================
-   山セット統合（百名山 + 追加山）
-   - 追加山は lat/lng/elev が未入力でもOK（後で geocode で補完）
+   動的山セット統合（百名山 + 花100/二百/三百を自動取得）
+   - “同名”は百名山優先、タグ/セットだけ付与
+   - 実座標は geocode で補完（表示対象のみ）
    ===================================================== */
 
 function ensureArray(v){ return Array.isArray(v) ? v : []; }
 
-function mergeMountainSets(){
-  // 百名山を基準に Map（name -> obj）を作る
-  const byName = new Map();
+function baseHundred(){
+  const by = new Map();
   for (const m of mountains){
     if (!m) continue;
     m.sets = ensureArray(m.sets);
     m.tags = ensureArray(m.tags);
     if (!m.sets.includes("HYAKU")) m.sets.push("HYAKU");
     if (!m.tags.includes("百名山")) m.tags.push("百名山");
-    byName.set(m.name, m);
+    by.set(m.name, m);
   }
+  return by;
+}
+let byName = baseHundred();
 
-  // 追加セットを統合
-  for (const [setKey, def] of Object.entries(MOUNTAIN_SETS)){
-    if (!def || !def.items) continue;
-    const tag = def.tag || def.label || setKey;
-    for (const it of def.items){
-      if (!it || !it.name) continue;
-      const name = it.name;
-      if (byName.has(name)){
-        const base = byName.get(name);
-        base.sets = ensureArray(base.sets);
-        base.tags = ensureArray(base.tags);
-        if (!base.sets.includes(setKey)) base.sets.push(setKey);
-        if (!base.tags.includes(tag)) base.tags.push(tag);
-        continue;
-      }
+async function addSetToByName(setKey){
+  const def = SET_DEFS?.[setKey];
+  if (!def) return;
 
-      // 新規の山（百名山にない）
-      const m = {
-        name,
-        lat: it.lat ?? null,
-        lng: it.lng ?? null,
-        elev: it.elev ?? null,
-        level: it.level ?? "中級",
-        gpx: null,
-        weather: {},
-        sets: [setKey],
-        tags: [tag],
-      };
-      byName.set(name, m);
+  const { names } = await loadSetNames(setKey);
+  for (const name of names){
+    if (!name) continue;
+
+    if (byName.has(name)){
+      const base = byName.get(name);
+      base.sets = ensureArray(base.sets);
+      base.tags = ensureArray(base.tags);
+      if (!base.sets.includes(setKey)) base.sets.push(setKey);
+      if (!base.tags.includes(def.tag)) base.tags.push(def.tag);
+      continue;
     }
-  }
 
-  return [...byName.values()];
+    byName.set(name, {
+      name,
+      lat: null, lng: null, elev: null,
+      level: "中級",
+      gpx: null,
+      weather: {},
+      sets: [setKey],
+      tags: [def.tag],
+    });
+  }
 }
 
-const ALL_MOUNTAINS = mergeMountainSets();
+/* ===== 同時実行制限 ===== */
+function pLimit(concurrency){
+  let active = 0;
+  const queue = [];
+  const next = () => {
+    if (active >= concurrency || queue.length === 0) return;
+    active++;
+    const { fn, resolve, reject } = queue.shift();
+    Promise.resolve().then(fn).then(resolve, reject).finally(() => {
+      active--;
+      next();
+    });
+  };
+  return (fn) => new Promise((resolve, reject) => {
+    queue.push({ fn, resolve, reject });
+    next();
+  });
+}
+const limitGeo = pLimit(6);
+const limitWx  = pLimit(6);
+
+/* ===== 重要：マーカーは作り直さない ===== */
+const markerEntries = [];            // {m, marker, shown}
+const markerIndex = new Map();       // name -> entry（重複生成防止）
+
+async function ensureMountainReady(m){
+  // overrides
+  const ov = GEO_OVERRIDES?.[m.name] ?? null;
+  if (ov){
+    if (Number.isFinite(Number(ov.lat))) m.lat = Number(ov.lat);
+    if (Number.isFinite(Number(ov.lng))) m.lng = Number(ov.lng);
+    if (Number.isFinite(Number(ov.elev))) m.elev = Math.round(Number(ov.elev));
+  }
+
+  // geocode (必要な山だけ)
+  if (!Number.isFinite(Number(m.lat)) || !Number.isFinite(Number(m.lng))){
+    const g = await limitGeo(() => geocodeMountain(m.name));
+    if (!g) return false;
+    m.lat = g.lat; m.lng = g.lng;
+    if (!Number.isFinite(Number(m.elev)) && Number.isFinite(Number(g.elev))) m.elev = g.elev;
+  }
+
+  // weather
+  if (!m.weather || Object.keys(m.weather).length === 0){
+    m.weather = await limitWx(() => generateWeatherScore(m.name, m.lat, m.lng, m.level, m.elev));
+  }
+
+  // marker（未作成なら追加のみ）
+  if (!markerIndex.has(m.name)){
+    const marker = L.marker([m.lat, m.lng], { icon: icons["C"] });
+    marker.on("click", () => {
+      map.setView([m.lat, m.lng], Math.max(map.getZoom(), 10));
+      openDetail(m, marker);
+    });
+    const entry = { m, marker, shown:false };
+    markerEntries.push(entry);
+    markerIndex.set(m.name, entry);
+  }
+  return true;
+}
+
+function getSelectedSetKeys(){
+  const setKeys = [];
+  if (document.getElementById("setHYAKU").checked) setKeys.push("HYAKU");
+  if (document.getElementById("setHANA_100").checked) setKeys.push("HANA_100");
+  if (document.getElementById("setNIHON_200").checked) setKeys.push("NIHON_200");
+  if (document.getElementById("setNIHON_300").checked) setKeys.push("NIHON_300");
+  return setKeys;
+}
+
+async function refreshSelectedSets(){
+  const setKeys = getSelectedSetKeys();
+
+  // HYAKU以外は動的ロード
+  for (const k of setKeys){
+    if (k === "HYAKU") continue;
+    await addSetToByName(k);
+  }
+
+  // 選択中セットに属する山だけ “準備”
+  const all = [...byName.values()];
+  const targets = all.filter(m => ensureArray(m.sets).some(s => setKeys.includes(s)));
+
+  for (let i=0; i<targets.length; i++){
+    await ensureMountainReady(targets[i]);
+    if (i % 20 === 0) updateView();
+  }
+
+  updateView();
+}
 
 /* ===== utils ===== */
 function getDetail(m, dateKey, time){
@@ -517,8 +598,7 @@ function safeDate(iso){
 function fmtJpDateTime(iso){
   const d = safeDate(iso);
   if (!d) return "-";
-  const pad = (n) => String(n).padStart(2,"0");
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 function timeAgo(iso){
   const d = safeDate(iso);
@@ -571,7 +651,6 @@ function buildMetaBox(m){
   `;
 }
 
-/* ===== スコア早見表 ===== */
 function scoreCellClass(score){
   if (score === "A") return "a";
   if (score === "B") return "b";
@@ -608,7 +687,6 @@ function buildScoreGridHtml(m, selDay, selTime){
   `;
 }
 
-/* ===== ベスト時間 ===== */
 function getBestTime(weather, dateKey){
   const w = weather?.[dateKey];
   if (!w) return null;
@@ -621,7 +699,6 @@ function getBestTime(weather, dateKey){
   return best;
 }
 
-/* ===== 詳細HTML（中腹/山頂の2段表示） ===== */
 function detailHtml(m, selectedTime){
   const day = Number(daySelect.value);
   const dateKey = getDateKey(day);
@@ -839,9 +916,6 @@ function drawList(items, day){
   });
 }
 
-/* ===== 重要：マーカーは作り直さない ===== */
-const markerEntries = [];
-
 /* ===== フィルタ状態 ===== */
 function getState(){
   const day = Number(daySelect.value);
@@ -849,11 +923,7 @@ function getState(){
   const dateKey = getDateKey(day);
   const goodOnly = document.getElementById("goodOnly").checked;
 
-  const setKeys = [];
-  if (document.getElementById("setHYAKU").checked) setKeys.push("HYAKU");
-  if (document.getElementById("setHANA_100").checked) setKeys.push("HANA_100");
-  if (document.getElementById("setNIHON_200").checked) setKeys.push("NIHON_200");
-  if (document.getElementById("setNIHON_300").checked) setKeys.push("NIHON_300");
+  const setKeys = getSelectedSetKeys();
 
   const scores = [...document.querySelectorAll(
     'input[value="A"]:checked,input[value="B"]:checked,input[value="C"]:checked'
@@ -877,9 +947,9 @@ function updateView(){
 
     const score = m.weather?.[dateKey]?.[time];
 
-    const passSet = (setKeys.length === 0)
-      ? false
-      : ensureArray(m.sets).some(s => setKeys.includes(s));
+    const passSet = (setKeys.length > 0)
+      ? ensureArray(m.sets).some(s => setKeys.includes(s))
+      : false;
 
     const pass =
       passSet &&
@@ -925,73 +995,32 @@ async function init(){
   if (Number(daySelect.value) === 0) setSliderIndex(nearestTimeSlotIndexNow());
   else setSliderIndex(Number(slider.value));
 
-  // =============================================
-  // 1) 追加山の座標補完（Open-Meteo Geocoding）
-  // =============================================
-  for (const m of ALL_MOUNTAINS){
-    // 既知の上書き（同名が多い等の“確定”用）
-    const ov = GEO_OVERRIDES?.[m.name] ?? null;
-    if (ov){
-      if (Number.isFinite(Number(ov.lat))) m.lat = Number(ov.lat);
-      if (Number.isFinite(Number(ov.lng))) m.lng = Number(ov.lng);
-      if (Number.isFinite(Number(ov.elev))) m.elev = Math.round(Number(ov.elev));
-    }
-
-    // lat/lng がない山だけ geocode
-    if (!Number.isFinite(Number(m.lat)) || !Number.isFinite(Number(m.lng))){
-      const g = await geocodeMountain(m.name);
-      if (g){
-        m.lat = g.lat;
-        m.lng = g.lng;
-        if (!Number.isFinite(Number(m.elev)) && Number.isFinite(Number(g.elev))) m.elev = g.elev;
-        m._geocode = g;
-      } else {
-        m._geocode = null;
-      }
-    }
-  }
-
-  // =============================================
-  // 2) 天気スコア取得（座標がある山のみ）
-  // =============================================
-  await Promise.all(ALL_MOUNTAINS.map(async m => {
-    if (!Number.isFinite(Number(m.lat)) || !Number.isFinite(Number(m.lng))) return;
-    if (!m.weather || Object.keys(m.weather).length === 0) {
-      // ★ 山の標高 m.elev を渡す（山頂）
-      m.weather = await generateWeatherScore(m.name, m.lat, m.lng, m.level, m.elev);
-
-      // Geocode URL も meta に残せると後で便利
-      if (m._geocode && m.weather?._meta){
-        m.weather._meta.geocode_url = m._geocode._geocodeUrl;
-        m.weather._meta.geocode_name = m._geocode._geocodeName;
-        m.weather._meta.geocode_country = m._geocode._geocodeCountry;
-      }
-    }
-  }));
-
-  // =============================================
-  // 3) マーカー生成（座標がある山のみ）
-  // =============================================
-  for (const m of ALL_MOUNTAINS){
-    if (!Number.isFinite(Number(m.lat)) || !Number.isFinite(Number(m.lng))) continue;
-    const marker = L.marker([m.lat, m.lng], { icon: icons["C"] });
-    marker.on("click", () => {
-      map.setView([m.lat, m.lng], Math.max(map.getZoom(), 10));
-      openDetail(m, marker);
-    });
-    markerEntries.push({ m, marker, shown:false });
-  }
-
+  // 各UI変更で updateView（ただしセット系は refreshSelectedSets を呼ぶ）
   document.querySelectorAll("#control input,#control select")
     .forEach(e => {
       if (e === daySelect) return;
-      e.addEventListener("change", updateView);
+      // セット系のチェックは updateView だけじゃなく準備が必要
+      if (e.id === "setHANA_100" || e.id === "setNIHON_200" || e.id === "setNIHON_300"){
+        e.addEventListener("change", refreshSelectedSets);
+      } else if (e.id === "setHYAKU"){
+        e.addEventListener("change", () => { updateView(); });
+      } else {
+        e.addEventListener("change", updateView);
+      }
     });
 
   initMobileListGestures();
   setListCollapsed(isMobile() ? true : false);
 
-  updateView();
+  // 初回：百名山の“マーカー準備”は一気にやる（既に座標あり前提）
+  // ※ ただし weather は初回取得が重いので、まずは「表示に必要な分だけ」でもOK。
+  // 今回は百名山は従来通り全件準備する（既存挙動に近い）
+  for (const m of mountains){
+    await ensureMountainReady(m);
+  }
+
+  // 初回：選択中セットをロード（デフォは百名山のみ）
+  await refreshSelectedSets();
 }
 
 init();
