@@ -1,17 +1,13 @@
-// weather.js (tenkura-like, precip-primary, elevation-adjust, mid+summit, v9)
-//
-// 修正点(v9):
-// - Open-Meteo へのリクエストに elevation= を渡さない
-//   → json.elevation を「地表/モデル側の標高」として使い、中腹/山頂補正の基準にする
-// - これにより「中腹」と「山頂」が同じ値になる問題を解消
-//
-// スコアは山頂（安全側）で判定。表示は中腹/山頂の2段。
+// weather.js v11
+// - 中腹/山頂の2段表示は維持
+// - スコアは「降水主軸」+「風/気温は“その山の基準(地域×標高帯×月)”からの悪化分」で補助
+// - 月(季節)で baseline を可変にして、冬の厳しさ/夏の緩さを自然に反映
 
 const OPEN_METEO_ENDPOINT = "https://api.open-meteo.com/v1/forecast";
 const TIMEZONE = "Asia/Tokyo";
 
 // キャッシュ
-const CACHE_PREFIX = "mount_weather_v9_"; // ★ v9
+const CACHE_PREFIX = "mount_weather_v11_";
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1時間
 
 // UI時間帯（index.htmlと合わせる）
@@ -28,65 +24,213 @@ function dateKeyLocal(d){
 function isoNow(){ return new Date().toISOString(); }
 function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
 
-// ===== スコア判定（降水主軸・風/気温は補助） =====
-function thresholdsByLevel(level){
-  const base = {
-    rainA: 1.0, rainB: 4.0,
-    windWarn: 16, windDanger: 22,
-    gustWarn: 25, gustDanger: 33,
-    tempWarn: -6, tempDanger: -12
+// =====================================================
+// 1) 地域×標高帯×月 の「基準（その山のふつう）」
+// =====================================================
+
+// 気温減率（平年推定にも使う） 6.5℃/1000m
+const LAPSE_C_PER_1000M = 6.5;
+
+// 地域判定（ざっくり：日本向け）
+function detectRegion(lat, lng){
+  if (lat >= 42.0) return "北海道";
+  if (lat >= 38.0) return "東北";
+  if (lat >= 35.5 && lng >= 137.0 && lng <= 141.5) return "関東甲信";
+  if (lat >= 35.5 && lng < 137.0) return "北陸";
+  if (lat >= 34.3 && lat < 35.5 && lng >= 136.0 && lng <= 139.2) return "東海";
+  if (lat >= 33.8 && lat < 35.5 && lng >= 134.0 && lng < 136.5) return "近畿";
+  if (lat >= 32.8 && lat < 34.3 && lng >= 132.0 && lng < 134.5) return "中国四国";
+  if (lat < 32.8) return "九州";
+  return "本州";
+}
+
+// 地域ごとの「海抜0mの基準（年平均っぽい）」
+// ※ここを月別補正で動かす
+const REGION_BASE = {
+  "北海道":   { tempSea:  5, wind: 6.5 },
+  "東北":     { tempSea:  9, wind: 6.0 },
+  "北陸":     { tempSea: 11, wind: 6.5 },
+  "関東甲信": { tempSea: 13, wind: 5.5 },
+  "東海":     { tempSea: 14, wind: 5.5 },
+  "近畿":     { tempSea: 14, wind: 5.5 },
+  "中国四国": { tempSea: 15, wind: 5.5 },
+  "九州":     { tempSea: 16, wind: 5.8 },
+  "本州":     { tempSea: 13, wind: 5.8 },
+};
+
+function elevBandFactorWind(elevM){
+  // 標高が上がるほど“普段から”風は強め、という基準を少し足す
+  if (!Number.isFinite(elevM)) return 0;
+  if (elevM < 1000) return 0.0;
+  if (elevM < 2000) return 0.8;
+  if (elevM < 2800) return 1.4;
+  return 1.8;
+}
+
+/**
+ * 月別補正（ざっくり）
+ * - tempSea は「冬は下げる、夏は上げる」
+ * - wind は「冬〜春はやや上げる、夏は少し下げる」
+ *
+ * ここは“てんくら寄せ”のチューニングポイント。
+ * まずは過激にしない値にしてある。
+ */
+function monthAdjust(month, region){
+  // month: 1..12
+  // 気温（海抜0m基準）補正 ℃
+  // 北ほど季節振幅が大きい → 北海道/東北は倍率を少し増やす
+  const amp =
+    (region === "北海道") ? 1.15 :
+    (region === "東北")   ? 1.10 :
+    1.00;
+
+  // 日本の季節感（ざっくり）
+  // 12-2: 真冬 / 3: 早春 / 4-5: 春 / 6: 梅雨 / 7-8: 真夏 / 9: 初秋 / 10-11: 秋
+  let dTempSea = 0;
+  if ([12,1,2].includes(month)) dTempSea = -6.0;
+  else if (month === 3) dTempSea = -3.0;
+  else if ([4,5].includes(month)) dTempSea = -1.0;
+  else if (month === 6) dTempSea = +0.5;
+  else if ([7,8].includes(month)) dTempSea = +3.0;
+  else if (month === 9) dTempSea = +1.5;
+  else if ([10,11].includes(month)) dTempSea = -1.5;
+
+  dTempSea *= amp;
+
+  // 風（基準風速）補正 m/s
+  // 冬〜春は気圧配置で強風日が増える想定、夏は弱め
+  let dWind = 0;
+  if ([12,1,2].includes(month)) dWind = +0.8;
+  else if ([3,4].includes(month)) dWind = +0.5;
+  else if ([5,6].includes(month)) dWind = +0.2;
+  else if ([7,8].includes(month)) dWind = -0.2;
+  else if (month === 9) dWind = +0.1;
+  else if ([10,11].includes(month)) dWind = +0.3;
+
+  // 北陸は冬型で風が強めになりやすい想定で少し上乗せ
+  if (region === "北陸" && [12,1,2].includes(month)) dWind += 0.2;
+
+  return { dTempSea, dWind };
+}
+
+function baselineAtElevation(lat, lng, elevM, month){
+  const region = detectRegion(lat, lng);
+  const base = REGION_BASE[region] ?? REGION_BASE["本州"];
+  const m = (Number.isFinite(month) ? month : (new Date().getMonth()+1));
+  const adj = monthAdjust(m, region);
+
+  // 月別補正された海抜0m基準
+  const tempSeaMonthly = base.tempSea + adj.dTempSea;
+  const windBaseMonthly = base.wind + adj.dWind;
+
+  // “平年っぽい”気温（海抜0m→標高へ）
+  const temp = tempSeaMonthly - (LAPSE_C_PER_1000M * (elevM / 1000));
+
+  // “平年っぽい”風（地域の基準＋標高帯）
+  const wind = windBaseMonthly + elevBandFactorWind(elevM);
+
+  // 突風の基準：風の1.6倍（固定でOK）
+  const gust = wind * 1.6;
+
+  return {
+    region,
+    month: m,
+    temp,
+    wind,
+    gust,
+    elev: elevM,
+    _components: { tempSeaMonthly, windBaseMonthly, dTempSea: adj.dTempSea, dWind: adj.dWind }
   };
-  if (level === "初級"){
-    return {
-      rainA: 0.8, rainB: 3.5,
-      windWarn: 15, windDanger: 20,
-      gustWarn: 23, gustDanger: 30,
-      tempWarn: -4, tempDanger: -10
-    };
-  }
-  if (level === "上級"){
-    return {
-      rainA: 1.2, rainB: 4.5,
-      windWarn: 17, windDanger: 24,
-      gustWarn: 27, gustDanger: 35,
-      tempWarn: -7, tempDanger: -13
-    };
-  }
-  return base;
+}
+
+// =====================================================
+// 2) スコア判定（降水主軸 + 風/気温は“基準からの悪化分”）
+// =====================================================
+
+function thresholdsByLevel(level){
+  const rain = (level === "初級")
+    ? { A: 0.8, B: 3.5 }
+    : (level === "上級")
+      ? { A: 1.2, B: 4.5 }
+      : { A: 1.0, B: 4.0 };
+
+  const windDelta = (level === "初級")
+    ? { warn: 4.0, danger: 7.0 }
+    : (level === "上級")
+      ? { warn: 6.0, danger: 10.0 }
+      : { warn: 5.0, danger: 9.0 };
+
+  const coldDelta = (level === "初級")
+    ? { warn: 5, danger: 10 }
+    : (level === "上級")
+      ? { warn: 7, danger: 13 }
+      : { warn: 6, danger: 12 };
+
+  return { rain, windDelta, coldDelta };
 }
 
 function baseScoreByPrecip(p, th){
   if (p === null) return null;
-  if (p <= th.rainA) return "A";
-  if (p <= th.rainB) return "B";
+  if (p <= th.rain.A) return "A";
+  if (p <= th.rain.B) return "B";
   return "C";
 }
-function applyWindSupport(score, wind, gust, th){
-  const danger = (wind !== null && wind >= th.windDanger) || (gust !== null && gust >= th.gustDanger);
+
+function applyWindSupportByDelta(score, wind, gust, baseWind, baseGust, th){
+  const dW = (wind !== null && baseWind !== null) ? (wind - baseWind) : null;
+  const dG = (gust !== null && baseGust !== null) ? (gust - baseGust) : null;
+
+  const danger =
+    (dW !== null && dW >= th.windDelta.danger) ||
+    (dG !== null && dG >= th.windDelta.danger * 1.2);
+
   if (danger) return "C";
-  const warn = (wind !== null && wind >= th.windWarn) || (gust !== null && gust >= th.gustWarn);
+
+  const warn =
+    (dW !== null && dW >= th.windDelta.warn) ||
+    (dG !== null && dG >= th.windDelta.warn * 1.2);
+
   if (warn && score === "A") return "B";
   return score;
 }
-function applyTempSupport(score, temp, th){
-  if (temp === null) return score;
-  if (temp <= th.tempDanger) return "C";
-  if (temp <= th.tempWarn && score === "A") return "B";
+
+function applyTempSupportByDelta(score, temp, baseTemp, th){
+  const dC = (temp !== null && baseTemp !== null) ? (baseTemp - temp) : null;
+  if (dC === null) return score;
+
+  if (dC >= th.coldDelta.danger) return "C";
+  if (dC >= th.coldDelta.warn && score === "A") return "B";
   return score;
 }
-function scoreBySummit(level, summitMetrics){
+
+function scoreBySummitWithBaseline(level, summitMetrics, baselineSummit){
   const th = thresholdsByLevel(level);
+
   let s = baseScoreByPrecip(summitMetrics.precipitation, th);
-  s = applyWindSupport(s, summitMetrics.windspeed, summitMetrics.gust, th);
-  s = applyTempSupport(s, summitMetrics.temp, th);
+
+  s = applyWindSupportByDelta(
+    s,
+    summitMetrics.windspeed,
+    summitMetrics.gust,
+    baselineSummit?.wind ?? null,
+    baselineSummit?.gust ?? null,
+    th
+  );
+
+  s = applyTempSupportByDelta(
+    s,
+    summitMetrics.temp,
+    baselineSummit?.temp ?? null,
+    th
+  );
+
   return { score: s, thresholds: th };
 }
 
-// ===== 標高補正（山頂/中腹） =====
-// 気温減率：6.5℃/1000m（標準大気の目安）
-const LAPSE_C_PER_1000M = 6.5;
+// =====================================================
+// 3) “APIの地表標高”から中腹/山頂へ補正（表示用）
+// =====================================================
 
-// 風補正：控えめ（標高差1000mで+15%、最大+30%）
 function windExposureFactor(deltaElevM){
   if (!Number.isFinite(deltaElevM)) return 1.0;
   const k = 1.0 + 0.15 * (deltaElevM / 1000);
@@ -99,16 +243,13 @@ function adjustToElevation(raw, targetElevM, apiElevM){
 
   const out = { ...raw };
 
-  // api標高が取れないときは補正不能（そのまま）
   if (tgt === null || api === null) {
     out._elev = { target: tgt, api: api, delta: null };
     return out;
   }
 
-  const delta = tgt - api; // +なら山の方が高い
-  if (out.temp !== null) {
-    out.temp = out.temp - (LAPSE_C_PER_1000M * (delta / 1000));
-  }
+  const delta = tgt - api;
+  if (out.temp !== null) out.temp = out.temp - (LAPSE_C_PER_1000M * (delta / 1000));
 
   const f = windExposureFactor(delta);
   if (out.windspeed !== null) out.windspeed = out.windspeed * f;
@@ -126,8 +267,9 @@ function calcMidElevation(summitElevM, apiElevM){
   return Math.round(api + (s - api) * 0.5);
 }
 
-// ===== Open-Meteo取得 =====
-// ★ v9: elevation= を渡さない
+// =====================================================
+// 4) Open-Meteo取得（elevation=は渡さない）
+// =====================================================
 async function fetchOpenMeteo(lat, lng){
   const params = new URLSearchParams({
     latitude: String(lat),
@@ -158,6 +300,15 @@ function pickAtHour(hourly, wantIso){
   };
 }
 
+// =====================================================
+// 5) 組み立て（中腹/山頂 + baseline(月別)差分判定）
+// =====================================================
+function monthFromDateKey(dateKey){
+  // "YYYY-MM-DD" -> month 1..12
+  const m = Number(String(dateKey).slice(5,7));
+  return Number.isFinite(m) ? m : (new Date().getMonth()+1);
+}
+
 function buildFromHourly(name, lat, lng, level, hourly, summitElevM, apiElevM){
   const out = {};
   const details = {};
@@ -169,6 +320,16 @@ function buildFromHourly(name, lat, lng, level, hourly, summitElevM, apiElevM){
     dt.setHours(0,0,0,0);
     dt.setDate(dt.getDate() + d);
     const dk = dateKeyLocal(dt);
+    const month = monthFromDateKey(dk);
+
+    // その日(月)に合わせて baseline を作る（＝季節差が出る）
+    const baselineSummit = (Number.isFinite(Number(summitElevM)))
+      ? baselineAtElevation(lat, lng, Number(summitElevM), month)
+      : null;
+
+    const baselineMid = (Number.isFinite(Number(midElevM)))
+      ? baselineAtElevation(lat, lng, Number(midElevM), month)
+      : null;
 
     out[dk] = {};
     details[dk] = {};
@@ -184,44 +345,74 @@ function buildFromHourly(name, lat, lng, level, hourly, summitElevM, apiElevM){
         continue;
       }
 
-      // 山頂/中腹を補正して作る
+      // 表示用：中腹/山頂へ補正した“予報値”
       const summit = adjustToElevation(raw, summitElevM, apiElevM);
       const mid    = adjustToElevation(raw, midElevM,    apiElevM);
 
-      // スコアは山頂で判定（安全側）
-      const judged = scoreBySummit(level, summit);
+      // スコア：山頂の「基準(月別)との差」で判定（安全側）
+      const judged = scoreBySummitWithBaseline(level, summit, baselineSummit);
 
       out[dk][slot] = judged.score ?? null;
 
       details[dk][slot] = {
         precipitation: raw.precipitation,
 
-        // 中腹
+        // 中腹（予報）
         windspeed_mid: mid.windspeed,
         gust_mid:      mid.gust,
         temp_mid:      mid.temp,
 
-        // 山頂
+        // 山頂（予報）
         windspeed_summit: summit.windspeed,
         gust_summit:      summit.gust,
         temp_summit:      summit.temp,
+
+        // baseline（その山のふつう：月別）
+        baseline_region: baselineSummit?.region ?? null,
+        baseline_month: baselineSummit?.month ?? month,
+
+        baseline_wind_mid: baselineMid?.wind ?? null,
+        baseline_gust_mid: baselineMid?.gust ?? null,
+        baseline_temp_mid: baselineMid?.temp ?? null,
+
+        baseline_wind_summit: baselineSummit?.wind ?? null,
+        baseline_gust_summit: baselineSummit?.gust ?? null,
+        baseline_temp_summit: baselineSummit?.temp ?? null,
+
+        // debug用（必要なら表示に使える）
+        _baseline_components: {
+          mid: baselineMid?._components ?? null,
+          summit: baselineSummit?._components ?? null
+        },
 
         _thresholds: judged.thresholds,
         _elev: {
           api: toNumber(apiElevM),
           mid: toNumber(midElevM),
           summit: toNumber(summitElevM),
-          delta_mid: mid?._elev?.delta ?? null,
-          delta_summit: summit?._elev?.delta ?? null
         }
       };
     }
   }
 
-  return { out, details, midElevM };
+  // meta用に“今日”の baseline region/month を返しておく
+  const todayMonth = new Date().getMonth() + 1;
+  const metaBaseline = (Number.isFinite(Number(summitElevM)))
+    ? baselineAtElevation(lat, lng, Number(summitElevM), todayMonth)
+    : null;
+
+  return {
+    out,
+    details,
+    midElevM,
+    baselineRegion: metaBaseline?.region ?? null,
+    baselineMonth: metaBaseline?.month ?? todayMonth
+  };
 }
 
-// ===== ダミー（フォールバック） =====
+// =====================================================
+// 6) ダミー（フォールバック）
+// =====================================================
 function hashCode(str){
   let h = 0;
   for (let i=0; i<str.length; i++){
@@ -254,21 +445,25 @@ function dummyWeather(name, lat, lng, level, summitElevM, reason){
     const dt = new Date(now.getTime());
     dt.setDate(dt.getDate() + d);
     const dk = dateKeyLocal(dt);
+    const month = monthFromDateKey(dk);
+
+    const baseS = (summit !== null) ? baselineAtElevation(lat, lng, summit, month) : null;
+    const baseM = (mid !== null) ? baselineAtElevation(lat, lng, mid, month) : null;
 
     out[dk] = {};
     details[dk] = {};
 
     for (const slot of TIME_SLOTS){
-      const precipitation = clamp(rand() * 5.5, 0, 8);
-      const windRaw = clamp(rand() * 14, 0, 22);
-      const gustRaw = clamp(windRaw + rand()*10, 0, 36);
+      const precipitation = clamp(rand() * 5.0, 0, 8);
+      const windRaw = clamp(rand() * 12, 0, 20);
+      const gustRaw = clamp(windRaw + rand()*10, 0, 34);
       const tempRaw = clamp((rand() * 18) - 2, -12, 22);
 
       const tempSummit = (summit !== null) ? (tempRaw - 5) : tempRaw;
       const tempMid    = (mid !== null) ? (tempRaw - 2.5) : tempRaw;
 
       const summitMetrics = { precipitation, windspeed: windRaw, gust: gustRaw, temp: tempSummit };
-      const judged = scoreBySummit(level, summitMetrics);
+      const judged = scoreBySummitWithBaseline(level, summitMetrics, baseS);
 
       out[dk][slot] = judged.score ?? "B";
       details[dk][slot] = {
@@ -279,8 +474,19 @@ function dummyWeather(name, lat, lng, level, summitElevM, reason){
         windspeed_summit: windRaw,
         gust_summit: gustRaw,
         temp_summit: tempSummit,
+
+        baseline_region: baseS?.region ?? null,
+        baseline_month: baseS?.month ?? month,
+
+        baseline_wind_mid: baseM?.wind ?? null,
+        baseline_gust_mid: baseM?.gust ?? null,
+        baseline_temp_mid: baseM?.temp ?? null,
+        baseline_wind_summit: baseS?.wind ?? null,
+        baseline_gust_summit: baseS?.gust ?? null,
+        baseline_temp_summit: baseS?.temp ?? null,
+
         _thresholds: judged.thresholds,
-        _elev: { api: null, mid, summit, delta_mid: null, delta_summit: null }
+        _elev: { api: null, mid, summit }
       };
     }
   }
@@ -298,7 +504,9 @@ function dummyWeather(name, lat, lng, level, summitElevM, reason){
   };
 }
 
-// ===== キャッシュ =====
+// =====================================================
+// 7) キャッシュ
+// =====================================================
 function cacheKey(lat, lng, summitElevM){
   const la = Number(lat).toFixed(3);
   const ln = Number(lng).toFixed(3);
@@ -327,7 +535,9 @@ function saveCache(lat, lng, summitElevM, payload){
   }catch{}
 }
 
-// ===== 公開API =====
+// =====================================================
+// 8) 公開API
+// =====================================================
 export async function generateWeatherScore(name, lat, lng, level="中級", summitElevM=null){
   const cached = loadCache(lat, lng, summitElevM);
   if (cached && cached.out && cached.details && cached.meta) {
@@ -340,10 +550,8 @@ export async function generateWeatherScore(name, lat, lng, level="中級", summi
     const hourly = json?.hourly;
     if (!hourly) throw new Error("Open-Meteo hourly missing");
 
-    // ★ APIが返す地表標高（モデル/格子側の標高）
     const apiElev = toNumber(json?.elevation);
-
-    const { out, details, midElevM } = buildFromHourly(
+    const { out, details, midElevM, baselineRegion, baselineMonth } = buildFromHourly(
       name, lat, lng, level, hourly, summitElevM, apiElev
     );
 
@@ -354,7 +562,9 @@ export async function generateWeatherScore(name, lat, lng, level="中級", summi
       url,
       elevation_api: apiElev,
       elevation_summit: Number.isFinite(Number(summitElevM)) ? Math.round(Number(summitElevM)) : null,
-      elevation_mid: Number.isFinite(Number(midElevM)) ? Math.round(Number(midElevM)) : null
+      elevation_mid: Number.isFinite(Number(midElevM)) ? Math.round(Number(midElevM)) : null,
+      baseline_region: baselineRegion,
+      baseline_month: baselineMonth
     };
 
     const payload = { out, details, meta, fetchedAt: meta.fetchedAt };
