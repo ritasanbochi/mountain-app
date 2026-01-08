@@ -1,14 +1,38 @@
 // mountains_extra.js
-// generated at: 2026-01-08T10:50:19.121Z
-// source: wikipedia list (mountaimSets.js) + open-meteo geocoding (weather.js)
+// generated at: 2026-01-08T11:20:05.984Z
+// source: wikipedia coordinates first + open-meteo geocoding fallback
 // note: level is temporary ("中級") for extra mountains.
 
 const mountainsExtra = [
+  {
+    "name": "アポイ岳",
+    "lat": 42.10777778,
+    "lng": 143.02555556,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "HANA_100"
+    ]
+  },
   {
     "name": "カムイエクウチカウシ山",
     "lat": 42.62517,
     "lng": 142.7667,
     "elev": 1980,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
+    "name": "ニペソツ山",
+    "lat": 43.45594444,
+    "lng": 143.03222222,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -50,6 +74,42 @@ const mountainsExtra = [
     "weather": {},
     "_sets": [
       "HANA_100"
+    ]
+  },
+  {
+    "name": "葦毛湿原",
+    "lat": 34.74853056,
+    "lng": 137.45045556,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "HANA_100"
+    ]
+  },
+  {
+    "name": "芦別岳",
+    "lat": 43.23572222,
+    "lng": 142.28352778,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
+    "name": "安平路山",
+    "lat": 35.63055556,
+    "lng": 137.77444444,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
     ]
   },
   {
@@ -101,18 +161,6 @@ const mountainsExtra = [
     ]
   },
   {
-    "name": "雲取山",
-    "lat": 33.76393,
-    "lng": 130.78964,
-    "elev": 579,
-    "level": "中級",
-    "gpx": null,
-    "weather": {},
-    "_sets": [
-      "HANA_100"
-    ]
-  },
-  {
     "name": "英彦山",
     "lat": 33.48333,
     "lng": 130.9,
@@ -137,15 +185,15 @@ const mountainsExtra = [
     ]
   },
   {
-    "name": "火打山",
-    "lat": 36.92214,
-    "lng": 138.0672,
-    "elev": 2462,
+    "name": "奥大日岳",
+    "lat": 36.59833333,
+    "lng": 137.58083333,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
     "_sets": [
-      "HANA_100"
+      "NIHON_200"
     ]
   },
   {
@@ -153,6 +201,18 @@ const mountainsExtra = [
     "lat": 36.22375,
     "lng": 137.64166,
     "elev": 2572,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
+    "name": "餓鬼岳",
+    "lat": 36.44722222,
+    "lng": 137.73611111,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -197,6 +257,30 @@ const mountainsExtra = [
     ]
   },
   {
+    "name": "茅ヶ岳",
+    "lat": 35.79502778,
+    "lng": 138.51377778,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
+    "name": "乾徳山",
+    "lat": 35.82272222,
+    "lng": 138.71486111,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
     "name": "丸笹山",
     "lat": 33.87407,
     "lng": 134.0899,
@@ -213,6 +297,42 @@ const mountainsExtra = [
     "lat": 36.73967,
     "lng": 138.55753,
     "elev": 2166,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
+    "name": "久住山",
+    "lat": 33.08222222,
+    "lng": 131.24083333,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "HANA_100"
+    ]
+  },
+  {
+    "name": "弓折岳",
+    "lat": 36.34944444,
+    "lng": 137.59666667,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "HANA_100"
+    ]
+  },
+  {
+    "name": "笈ヶ岳",
+    "lat": 36.29861111,
+    "lng": 136.79222222,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -257,10 +377,10 @@ const mountainsExtra = [
     ]
   },
   {
-    "name": "金峰山",
-    "lat": 31.46667,
-    "lng": 130.38333,
-    "elev": 560,
+    "name": "空沼岳",
+    "lat": 42.865,
+    "lng": 141.25361111,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -283,9 +403,9 @@ const mountainsExtra = [
   },
   {
     "name": "鶏頂山",
-    "lat": 0,
-    "lng": 0,
-    "elev": 1765,
+    "lat": 36.90083333,
+    "lng": 139.76277778,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -294,10 +414,23 @@ const mountainsExtra = [
     ]
   },
   {
-    "name": "月山",
-    "lat": 38.54556,
-    "lng": 140.02695,
-    "elev": 1979,
+    "name": "戸隠山",
+    "lat": 36.77027778,
+    "lng": 138.055,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "HANA_100",
+      "NIHON_200"
+    ]
+  },
+  {
+    "name": "五頭山",
+    "lat": 37.80094444,
+    "lng": 139.34566667,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -306,10 +439,10 @@ const mountainsExtra = [
     ]
   },
   {
-    "name": "剣山",
-    "lat": 33.85478,
-    "lng": 134.09549,
-    "elev": 1954,
+    "name": "五葉山",
+    "lat": 39.20391667,
+    "lng": 141.72913889,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -378,6 +511,18 @@ const mountainsExtra = [
     ]
   },
   {
+    "name": "御池岳",
+    "lat": 35.17861111,
+    "lng": 136.415,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "HANA_100"
+    ]
+  },
+  {
     "name": "御嶽山",
     "lat": 35.8927,
     "lng": 137.4808,
@@ -415,26 +560,14 @@ const mountainsExtra = [
   },
   {
     "name": "高水山",
-    "lat": 0,
-    "lng": 0,
-    "elev": 759,
+    "lat": 35.82869444,
+    "lng": 139.18905556,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
     "_sets": [
       "HANA_100"
-    ]
-  },
-  {
-    "name": "高千穂峰",
-    "lat": 31.88712,
-    "lng": 130.9197,
-    "elev": 1448,
-    "level": "中級",
-    "gpx": null,
-    "weather": {},
-    "_sets": [
-      "NIHON_200"
     ]
   },
   {
@@ -463,9 +596,33 @@ const mountainsExtra = [
   },
   {
     "name": "高鈴山",
-    "lat": 0,
-    "lng": 0,
-    "elev": 623,
+    "lat": 36.62111111,
+    "lng": 140.58777778,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "HANA_100"
+    ]
+  },
+  {
+    "name": "国師岳",
+    "lat": 35.87083333,
+    "lng": 138.67305556,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "HANA_100"
+    ]
+  },
+  {
+    "name": "黒斑山",
+    "lat": 36.40527778,
+    "lng": 138.48861111,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -486,22 +643,10 @@ const mountainsExtra = [
     ]
   },
   {
-    "name": "黒部五郎岳",
-    "lat": 36.39254,
-    "lng": 137.53973,
-    "elev": 2897,
-    "level": "中級",
-    "gpx": null,
-    "weather": {},
-    "_sets": [
-      "HANA_100"
-    ]
-  },
-  {
     "name": "黒檜山",
-    "lat": 0,
-    "lng": 0,
-    "elev": 1828,
+    "lat": 36.5608,
+    "lng": 139.1936,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -522,15 +667,39 @@ const mountainsExtra = [
     ]
   },
   {
-    "name": "三筋山",
-    "lat": 0,
-    "lng": 0,
-    "elev": 821,
+    "name": "佐武流山",
+    "lat": 36.77219444,
+    "lng": 138.67061111,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
     "_sets": [
-      "HANA_100"
+      "NIHON_200"
+    ]
+  },
+  {
+    "name": "桜島岳",
+    "lat": 31.58861111,
+    "lng": 130.65472222,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
+    "name": "笹ヶ峰",
+    "lat": 33.82805556,
+    "lng": 133.27458333,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
     ]
   },
   {
@@ -538,18 +707,6 @@ const mountainsExtra = [
     "lat": 34.78693,
     "lng": 135.8588,
     "elev": 429,
-    "level": "中級",
-    "gpx": null,
-    "weather": {},
-    "_sets": [
-      "HANA_100"
-    ]
-  },
-  {
-    "name": "三頭山",
-    "lat": 0,
-    "lng": 0,
-    "elev": 1531,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -582,6 +739,18 @@ const mountainsExtra = [
     ]
   },
   {
+    "name": "市房山",
+    "lat": 32.31166667,
+    "lng": 131.10111111,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
     "name": "志賀高原",
     "lat": 36.7,
     "lng": 138.5,
@@ -594,10 +763,10 @@ const mountainsExtra = [
     ]
   },
   {
-    "name": "至仏山",
-    "lat": 36.90384,
-    "lng": 139.17357,
-    "elev": 2228,
+    "name": "雌阿寒岳",
+    "lat": 43.38630556,
+    "lng": 144.00880556,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -618,10 +787,46 @@ const mountainsExtra = [
     ]
   },
   {
+    "name": "縞枯山",
+    "lat": 36.07527778,
+    "lng": 138.33138889,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "HANA_100"
+    ]
+  },
+  {
+    "name": "守屋山",
+    "lat": 35.9675,
+    "lng": 138.09333333,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "HANA_100"
+    ]
+  },
+  {
     "name": "守門岳",
     "lat": 37.39773,
     "lng": 139.13628,
     "elev": 1511,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
+    "name": "秋田駒ヶ岳",
+    "lat": 39.76108333,
+    "lng": 140.79936111,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -642,10 +847,58 @@ const mountainsExtra = [
     ]
   },
   {
+    "name": "暑寒別岳",
+    "lat": 43.71583333,
+    "lng": 141.52294444,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
+    "name": "女峰山",
+    "lat": 36.81141667,
+    "lng": 139.53658333,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
+    "name": "小秀山",
+    "lat": 35.78555556,
+    "lng": 137.39694444,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
     "name": "焼石岳",
     "lat": 39.16313,
     "lng": 140.8212,
     "elev": 1488,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
+    "name": "上河内岳",
+    "lat": 35.38958333,
+    "lng": 138.15280556,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -690,10 +943,34 @@ const mountainsExtra = [
     ]
   },
   {
+    "name": "針ノ木岳",
+    "lat": 36.53805556,
+    "lng": 137.68444444,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
     "name": "生藤山",
-    "lat": 0,
-    "lng": 0,
-    "elev": 990,
+    "lat": 35.6725,
+    "lng": 139.13222222,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "HANA_100"
+    ]
+  },
+  {
+    "name": "西穂高岳",
+    "lat": 36.27888889,
+    "lng": 137.62916667,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -711,6 +988,18 @@ const mountainsExtra = [
     "weather": {},
     "_sets": [
       "HANA_100"
+    ]
+  },
+  {
+    "name": "石狩岳",
+    "lat": 43.54652778,
+    "lng": 143.02225,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
     ]
   },
   {
@@ -751,9 +1040,9 @@ const mountainsExtra = [
   },
   {
     "name": "川苔山",
-    "lat": 0,
-    "lng": 0,
-    "elev": 1363,
+    "lat": 35.85083333,
+    "lng": 139.10694444,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -774,18 +1063,6 @@ const mountainsExtra = [
     ]
   },
   {
-    "name": "浅間山",
-    "lat": 36.40643,
-    "lng": 138.52005,
-    "elev": 2568,
-    "level": "中級",
-    "gpx": null,
-    "weather": {},
-    "_sets": [
-      "HANA_100"
-    ]
-  },
-  {
     "name": "船形山",
     "lat": 38.455,
     "lng": 140.62111,
@@ -798,10 +1075,10 @@ const mountainsExtra = [
     ]
   },
   {
-    "name": "祖母山",
-    "lat": 32.82803,
-    "lng": 131.34721,
-    "elev": 1756,
+    "name": "双六岳",
+    "lat": 36.37194444,
+    "lng": 137.58722222,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -810,23 +1087,10 @@ const mountainsExtra = [
     ]
   },
   {
-    "name": "大岳山",
-    "lat": 0,
-    "lng": 0,
-    "elev": 1266,
-    "level": "中級",
-    "gpx": null,
-    "weather": {},
-    "_sets": [
-      "HANA_100",
-      "NIHON_200"
-    ]
-  },
-  {
-    "name": "大山",
-    "lat": 34.60359,
-    "lng": 138.2172,
-    "elev": 50,
+    "name": "大千軒岳",
+    "lat": 41.57944444,
+    "lng": 140.16083333,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -835,10 +1099,10 @@ const mountainsExtra = [
     ]
   },
   {
-    "name": "大雪山",
-    "lat": 30.5,
-    "lng": 101.5,
-    "elev": 3484,
+    "name": "大台ケ原山",
+    "lat": 34.18527778,
+    "lng": 136.10916667,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -859,6 +1123,18 @@ const mountainsExtra = [
     ]
   },
   {
+    "name": "大天井岳",
+    "lat": 36.365,
+    "lng": 137.70111111,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
     "name": "大楠山",
     "lat": 34.33804,
     "lng": 133.18163,
@@ -871,9 +1147,21 @@ const mountainsExtra = [
     ]
   },
   {
+    "name": "大日ヶ岳",
+    "lat": 36.00138889,
+    "lng": 136.83777778,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
     "name": "大菩薩峠",
-    "lat": 0,
-    "lng": 0,
+    "lat": 35.73583333,
+    "lng": 138.85333333,
     "elev": null,
     "level": "中級",
     "gpx": null,
@@ -895,6 +1183,31 @@ const mountainsExtra = [
     ]
   },
   {
+    "name": "大無間山",
+    "lat": 35.25597222,
+    "lng": 138.16152778,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
+    "name": "樽前山",
+    "lat": 42.69055556,
+    "lng": 141.37669444,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "HANA_100",
+      "NIHON_200"
+    ]
+  },
+  {
     "name": "地蔵岳",
     "lat": 37.86023,
     "lng": 139.75137,
@@ -907,10 +1220,34 @@ const mountainsExtra = [
     ]
   },
   {
+    "name": "池口岳",
+    "lat": 35.330167,
+    "lng": 138.038306,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
     "name": "中ノ岳",
     "lat": 42.46803,
     "lng": 142.88448,
     "elev": 1341,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
+    "name": "鳥甲山",
+    "lat": 36.83916667,
+    "lng": 138.584,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -955,10 +1292,47 @@ const mountainsExtra = [
     ]
   },
   {
+    "name": "天狗高原",
+    "lat": 33.47469444,
+    "lng": 132.99455556,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "HANA_100"
+    ]
+  },
+  {
     "name": "天城山",
     "lat": 34.88358,
     "lng": 139.03674,
     "elev": 981,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "HANA_100"
+    ]
+  },
+  {
+    "name": "東赤石山",
+    "lat": 33.875,
+    "lng": 133.375,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "HANA_100",
+      "NIHON_200"
+    ]
+  },
+  {
+    "name": "藤原岳",
+    "lat": 35.15861111,
+    "lng": 136.45277778,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -991,6 +1365,18 @@ const mountainsExtra = [
     ]
   },
   {
+    "name": "能郷白山",
+    "lat": 35.76236111,
+    "lng": 136.51405556,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
     "name": "伯母子岳",
     "lat": 34.07737,
     "lng": 135.65146,
@@ -1012,18 +1398,6 @@ const mountainsExtra = [
     "weather": {},
     "_sets": [
       "NIHON_200"
-    ]
-  },
-  {
-    "name": "白山",
-    "lat": 36.48204,
-    "lng": 136.58684,
-    "elev": 50,
-    "level": "中級",
-    "gpx": null,
-    "weather": {},
-    "_sets": [
-      "HANA_100"
     ]
   },
   {
@@ -1052,9 +1426,9 @@ const mountainsExtra = [
   },
   {
     "name": "八海山",
-    "lat": 33.36549,
-    "lng": 105.11893,
-    "elev": 1800,
+    "lat": 37.10391667,
+    "lng": 139.02402778,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -1087,10 +1461,58 @@ const mountainsExtra = [
     ]
   },
   {
+    "name": "尾瀬沼",
+    "lat": 36.925917,
+    "lng": 139.3045,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "HANA_100"
+    ]
+  },
+  {
+    "name": "尾鈴山",
+    "lat": 32.29916667,
+    "lng": 131.42666667,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
+    "name": "氷ノ山",
+    "lat": 35.35388889,
+    "lng": 134.51361111,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
     "name": "浜石岳",
     "lat": 35.12005,
     "lng": 138.53348,
     "elev": 698,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "HANA_100"
+    ]
+  },
+  {
+    "name": "富良野岳",
+    "lat": 43.39361111,
+    "lng": 142.635,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -1112,22 +1534,10 @@ const mountainsExtra = [
     ]
   },
   {
-    "name": "幕山",
-    "lat": 35.17369,
-    "lng": 139.09132,
-    "elev": 621,
-    "level": "中級",
-    "gpx": null,
-    "weather": {},
-    "_sets": [
-      "HANA_100"
-    ]
-  },
-  {
-    "name": "妙義山",
-    "lat": 36.28855,
-    "lng": 138.74445,
-    "elev": 1103,
+    "name": "武奈ヶ岳",
+    "lat": 35.26458333,
+    "lng": 135.89694444,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -1136,10 +1546,34 @@ const mountainsExtra = [
     ]
   },
   {
-    "name": "霧島山",
-    "lat": 31.91002,
-    "lng": 130.87032,
-    "elev": 1115,
+    "name": "北海道駒ヶ岳",
+    "lat": 42.06338889,
+    "lng": 140.67722222,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
+    "name": "毎日新聞社",
+    "lat": 35.69097222,
+    "lng": 139.75741667,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_300"
+    ]
+  },
+  {
+    "name": "幕山",
+    "lat": 35.17369,
+    "lng": 139.09132,
+    "elev": 621,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -1172,10 +1606,10 @@ const mountainsExtra = [
     ]
   },
   {
-    "name": "薬師岳",
-    "lat": 37.20159,
-    "lng": 138.66911,
-    "elev": 334,
+    "name": "爺ヶ岳",
+    "lat": 36.58833333,
+    "lng": 137.75083333,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -1188,18 +1622,6 @@ const mountainsExtra = [
     "lat": 36.39124,
     "lng": 137.77097,
     "elev": 2243,
-    "level": "中級",
-    "gpx": null,
-    "weather": {},
-    "_sets": [
-      "NIHON_200"
-    ]
-  },
-  {
-    "name": "由布岳",
-    "lat": 33.28288,
-    "lng": 131.39027,
-    "elev": 1584,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -1221,10 +1643,22 @@ const mountainsExtra = [
     ]
   },
   {
-    "name": "立山",
-    "lat": 30.61582,
-    "lng": 131.04681,
-    "elev": 86,
+    "name": "余市岳",
+    "lat": 43.03277778,
+    "lng": 141.01944444,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "HANA_100"
+    ]
+  },
+  {
+    "name": "礼文岳",
+    "lat": 45.3725,
+    "lng": 141.01583333,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
@@ -1237,6 +1671,30 @@ const mountainsExtra = [
     "lat": 39.57071,
     "lng": 140.75452,
     "elev": 1422,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
+    "name": "笊ヶ岳",
+    "lat": 35.42416667,
+    "lng": 138.25944444,
+    "elev": null,
+    "level": "中級",
+    "gpx": null,
+    "weather": {},
+    "_sets": [
+      "NIHON_200"
+    ]
+  },
+  {
+    "name": "朳差岳",
+    "lat": 37.9425,
+    "lng": 139.60888889,
+    "elev": null,
     "level": "中級",
     "gpx": null,
     "weather": {},
