@@ -1,276 +1,185 @@
-// mountaimSets.js (v3)
-// Wikipedia から 花100 / 二百 / 三百 の山名一覧を取得して返す（フロントのみ）
-// - 番号列・標高列を誤抽出しないよう列推定を強化
-// - localStorage にキャッシュ（7日）
-//
-// export:
-//  - SET_DEFS
-//  - loadSetNames(setKey)
-//  - GEO_OVERRIDES
+// mountaimSets.js
+// 山セットの「山名リスト取得」と「座標手入力の上書き」を管理
+// - 山名リストは Wikipedia から取得して localStorage にキャッシュ
+// - ここはフロントのみで動く前提（GitHub Pages OK）
 
-const WIKI_API = "https://ja.wikipedia.org/w/api.php";
-const CACHE_PREFIX = "mount_set_v3_";
-const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+export const GEO_OVERRIDES = {
+  // 自動取得で最後まで取れないやつだけ、必要最小限で手動追加
+  // "黒檜山": { lat: 36.5609, lng: 139.1936, elev: 1828 },
+};
 
-function nowIso(){ return new Date().toISOString(); }
-function safeJsonParse(s){ try{ return JSON.parse(s); }catch{ return null; } }
+export const SET_LABELS = {
+  HYAKU: "百名山",
+  HANA_100: "花の百名山",
+  NIHON_200: "二百名山",
+  NIHON_300: "三百名山",
+};
 
-function cacheKey(setKey){ return `${CACHE_PREFIX}${setKey}`; }
-function loadCache(setKey){
-  const raw = localStorage.getItem(cacheKey(setKey));
-  if (!raw) return null;
-  const obj = safeJsonParse(raw);
-  if (!obj?.fetchedAt || !Array.isArray(obj?.names)) return null;
-  const ts = Date.parse(obj.fetchedAt);
-  if (!Number.isFinite(ts)) return null;
-  if (Date.now() - ts > CACHE_TTL_MS) return null;
-  return obj;
+// Wikipediaページ名（日本語版）
+const SET_WIKI_PAGES = {
+  HANA_100: "花の百名山",
+  NIHON_200: "日本二百名山",
+  NIHON_300: "日本三百名山",
+};
+
+// localStorage キャッシュ設定
+const CACHE_PREFIX = "mount_set_names_v4";
+const CACHE_TTL_DAYS = 60; // 2か月くらいで十分
+const CACHE_TTL_MS = CACHE_TTL_DAYS * 24 * 60 * 60 * 1000;
+
+function nowMs() { return Date.now(); }
+
+function cacheKey(setKey) {
+  return `${CACHE_PREFIX}:${setKey}`;
 }
-function saveCache(setKey, names){
-  try{
-    localStorage.setItem(cacheKey(setKey), JSON.stringify({ fetchedAt: nowIso(), names }));
-  }catch{}
+
+function safeJsonParse(s) {
+  try { return JSON.parse(s); } catch { return null; }
 }
 
-function cleanName(s){
+function uniq(arr) {
+  return [...new Set(arr)];
+}
+
+function normalizeName(s) {
   return String(s ?? "")
-    .replace(/\[[0-9]+\]/g, "")      // 脚注 [1]
-    .replace(/\s+/g, " ")
     .trim()
-    .replace(/[（(].*?[）)]/g, "")  // 括弧除去
-    .trim();
+    .replace(/\s+/g, "")
+    .replace(/[（(].*?[）)]/g, "");
 }
 
-function looksLikeNumberOnly(s){
-  const t = String(s ?? "").trim();
-  if (!t) return true;
-  if (t === "番号" || t === "No." || t === "No") return true;
-  if (/^\d+$/.test(t)) return true;
-  return false;
-}
-function looksLikeElevation(s){
-  const t = String(s ?? "").trim();
-  if (!t) return false;
-  // 599m / 1,405m / 1700 m / 1700m級
-  if (/^\d{1,3}(,\d{3})*m$/i.test(t)) return true;
-  if (/^\d+(\.\d+)?m$/i.test(t)) return true;
-  if (t.includes("標高")) return true;
-  if (t.endsWith("m")) return true;
-  return false;
-}
-function containsMountainWord(s){
-  const t = String(s ?? "");
-  // “山” は地名にも混ざるので、岳/峰/ヶ岳なども含めて加点
-  return /[山岳峰ヶ]/.test(t);
+// 山名っぽくない混入を弾く（最低限）
+function looksBadName(name) {
+  return /(新聞|新聞社|会社|株式会社|協会|連盟|財団|法人|大学|研究所|病院|鉄道|駅|市|町|村)$/u.test(name);
 }
 
-function isBadName(s){
-  const t = cleanName(s);
-  if (!t) return true;
-  if (looksLikeNumberOnly(t)) return true;
-  if (looksLikeElevation(t)) return true;
+// 「山/岳/峰」っぽいキーワード（HANAはスポット混入もあるので少し緩め）
+function looksMountainish(name, setKey) {
+  if (!name) return false;
+  if (looksBadName(name)) return false;
 
-  const badHeaders = ["山名", "標高", "所在地", "都道府県", "備考", "番号", "No.", "No", "m", "標高m"];
-  if (badHeaders.includes(t)) return true;
+  // まずは末尾 or 含むで山っぽさを見る
+  const mountainWord = /山|岳|峰/u.test(name);
 
-  if (t.length <= 1) return true;
-  if (/^[\-\—–・]+$/.test(t)) return true;
-
-  // ほぼ数字記号だけ
-  if (!/[ぁ-んァ-ン一-龯]/.test(t)) return true;
-
-  return false;
+  if (setKey === "HANA_100") {
+    // 花100は「○○ヶ原」「○○沼」等が混じりやすいので、
+    // いったん “緩め” に通して、後段（座標取得側の除外）でコントロールする
+    return mountainWord || name.length <= 10;
+  }
+  return mountainWord;
 }
 
-async function fetchWikiHtml(pageTitle){
-  const params = new URLSearchParams({
-    action: "parse",
-    page: pageTitle,
-    prop: "text",
-    format: "json",
-    origin: "*",
-  });
-  const url = `${WIKI_API}?${params.toString()}`;
+async function fetchWikiHtml(pageTitle) {
+  const url =
+    "https://ja.wikipedia.org/w/api.php" +
+    "?action=parse&format=json&origin=*" +
+    "&prop=text" +
+    "&page=" + encodeURIComponent(pageTitle);
+
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`wiki parse failed: ${res.status}`);
-  const j = await res.json();
-  const html = j?.parse?.text?.["*"];
-  if (!html) throw new Error("wiki parse: no html");
+  if (!res.ok) throw new Error(`Wikipedia HTTP ${res.status}`);
+  const json = await res.json();
+  const html = json?.parse?.text?.["*"];
+  if (!html) throw new Error("Wikipedia parse text missing");
   return html;
 }
 
-function parseHtmlToDoc(html){
-  return new DOMParser().parseFromString(html, "text/html");
-}
+function extractNamesFromWikiHtml(html, setKey) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
 
-/** テーブルから「山名列」を推定して山名を抽出する */
-function extractFromTable(table){
-  const rows = [...table.querySelectorAll("tr")];
-  if (rows.length < 5) return [];
+  // Wikipedia内リンク（aタグ）からタイトルを拾う方針
+  // ただし本文中の関係ないリンクも混じるので、表やリスト優先のフィルタをする
+  const candidates = [];
 
-  // ヘッダ行を最初の3行から探す（ページによって複数段ヘッダがある）
-  let headerRow = null;
-  for (let i = 0; i < Math.min(3, rows.length); i++){
-    const cells = [...rows[i].querySelectorAll("th,td")];
-    const texts = cells.map(c => cleanName(c.textContent));
-    if (texts.some(t => t.includes("山名"))) { headerRow = rows[i]; break; }
-  }
+  // まずはテーブル（infobox以外）とリストを優先
+  const scopes = [
+    ...doc.querySelectorAll("table.wikitable, table.sortable, ul, ol"),
+  ];
 
-  let nameCol = -1;
-  if (headerRow){
-    const cells = [...headerRow.querySelectorAll("th,td")];
-    const texts = cells.map(c => cleanName(c.textContent));
-    texts.forEach((t, idx) => {
-      if (t.includes("山名")) nameCol = idx;
-    });
-  }
-
-  // 見つからなければ列スコアリング
-  if (nameCol === -1){
-    const colCount = Math.max(...rows.slice(0, 6).map(r => r.querySelectorAll("th,td").length));
-    const scores = new Array(colCount).fill(0);
-
-    // サンプル行（データ行）を見て、山名っぽい列を決める
-    const sampleRows = rows.slice(1, Math.min(rows.length, 25));
-    for (const r of sampleRows){
-      const cells = [...r.querySelectorAll("th,td")];
-      for (let i = 0; i < colCount; i++){
-        const c = cells[i];
-        if (!c) continue;
-        const txtRaw = cleanName(c.textContent);
-        const linkCount = c.querySelectorAll("a").length;
-
-        // 基本：リンクがある列は強く加点
-        if (linkCount > 0) scores[i] += 3;
-
-        // 文字（日本語）を含む列は加点
-        if (/[ぁ-んァ-ン一-龯]/.test(txtRaw)) scores[i] += 1;
-
-        // 山っぽい語がある列は加点
-        if (containsMountainWord(txtRaw)) scores[i] += 2;
-
-        // 数字だけ/標高っぽいのは強く減点
-        if (looksLikeNumberOnly(txtRaw)) scores[i] -= 6;
-        if (looksLikeElevation(txtRaw)) scores[i] -= 8;
-
-        // ほぼ数字・記号だけも減点
-        if (!/[ぁ-んァ-ン一-龯]/.test(txtRaw)) scores[i] -= 2;
-      }
-    }
-
-    // 最大スコア列を採用
-    let bestIdx = -1, bestScore = -1e9;
-    for (let i = 0; i < scores.length; i++){
-      if (scores[i] > bestScore){
-        bestScore = scores[i];
-        bestIdx = i;
-      }
-    }
-    nameCol = bestIdx;
-  }
-
-  if (nameCol === -1) return [];
-
-  // 抽出
-  const names = [];
-  for (let r = 1; r < rows.length; r++){
-    const cells = [...rows[r].querySelectorAll("th,td")];
-    if (!cells.length) continue;
-
-    const cell = cells[nameCol] || cells[0];
-    if (!cell) continue;
-
-    // リンク優先
-    const a = cell.querySelector("a");
-    const cand = cleanName(a?.textContent || cell.textContent);
-    if (isBadName(cand)) continue;
-    names.push(cand);
-  }
-  return names;
-}
-
-function extractNamesFromDoc(doc){
-  const names = [];
-
-  // まず wikitable 系
-  const tables = [...doc.querySelectorAll("table.wikitable, table.sortable, table")];
-  for (const t of tables){
-    const local = extractFromTable(t);
-    if (local.length >= 30){
-      names.push(...local);
-      break;
-    }
-  }
-
-  // fallback: リストから（テーブルが取れないとき用）
-  if (names.length < 30){
-    const lis = [...doc.querySelectorAll("ol li, ul li")];
-    const local = [];
-    for (const li of lis){
-      const a = li.querySelector("a");
-      const cand = cleanName(a?.textContent || li.textContent);
-      if (isBadName(cand)) continue;
-      if (cand.length >= 2) local.push(cand);
-    }
-    if (local.length >= 30) names.push(...local);
-  }
-
-  // 重複除去
-  const uniq = [];
   const seen = new Set();
-  for (const n of names){
-    const key = n.replace(/\s+/g, "");
-    if (!key) continue;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    uniq.push(n);
+
+  for (const scope of scopes) {
+    const links = scope.querySelectorAll("a[title]");
+    for (const a of links) {
+      const t = a.getAttribute("title");
+      if (!t) continue;
+
+      // Wikipediaの特殊リンク除外
+      if (t.startsWith("Help:") || t.startsWith("Category:") || t.startsWith("File:")) continue;
+
+      const n = normalizeName(t);
+      if (!n || n.length < 2) continue;
+      if (seen.has(n)) continue;
+
+      // セット別に山っぽさフィルタ
+      if (!looksMountainish(n, setKey)) continue;
+
+      seen.add(n);
+      candidates.push(n);
+    }
   }
 
-  return uniq;
+  // それでも少ないときは全体リンクも保険で拾う
+  if (candidates.length < 50) {
+    const links = doc.querySelectorAll("a[title]");
+    for (const a of links) {
+      const t = a.getAttribute("title");
+      const n = normalizeName(t);
+      if (!n || n.length < 2) continue;
+      if (seen.has(n)) continue;
+      if (!looksMountainish(n, setKey)) continue;
+      seen.add(n);
+      candidates.push(n);
+    }
+  }
+
+  // さらに軽く整形（混入っぽいのを最後に削る）
+  const cleaned = candidates.filter(n => !looksBadName(n));
+  return uniq(cleaned);
 }
 
-/** セット定義 */
-export const SET_DEFS = {
-  HANA_100:  { label: "花の百名山", page: "花の百名山" },
-  NIHON_200: { label: "日本二百名山", page: "日本二百名山" },
-  NIHON_300: { label: "日本三百名山", page: "日本三百名山" },
-};
+/**
+ * 山セットの山名リストを取得（Wikipedia→localStorage cache）
+ * @param {"HANA_100"|"NIHON_200"|"NIHON_300"} setKey
+ * @returns {Promise<{names: string[], meta: {cached: boolean, fetchedAt: string, count: number}}>}
+ */
+export async function loadSetNames(setKey) {
+  const page = SET_WIKI_PAGES[setKey];
+  if (!page) throw new Error(`Unknown setKey: ${setKey}`);
 
-/** 座標の手動補正 */
-export const GEO_OVERRIDES = {
-  // --- geocoding が落ちやすい（同名/一般名詞/峠など） ---
-  "三頭山":     { lat: null, lng: null, elev: 1531, note: "東京/山梨/埼玉の三県境付近の三頭山" },
-  "高鈴山":     { lat: null, lng: null, elev: 623,  note: "茨城（日立）の高鈴山" },
-  "三筋山":     { lat: null, lng: null, elev: 821,  note: "伊豆の三筋山（静岡）" },
-  "川苔山":     { lat: null, lng: null, elev: 1363, note: "奥多摩の川苔山（川乗山表記も）" },
-  "黒檜山":     { lat: null, lng: null, elev: 1828, note: "赤城山の黒檜山（群馬）" },
-  "大岳山":     { lat: null, lng: null, elev: 1266, note: "奥多摩の大岳山（東京）" },
-  "高水山":     { lat: null, lng: null, elev: 759,  note: "奥多摩の高水山（東京）" },
-  "鶏頂山":     { lat: null, lng: null, elev: 1765, note: "栃木（日光）方面の鶏頂山" },
-  "大菩薩峠":   { lat: null, lng: null, elev: null, note: "峠は山頂ではない。大菩薩嶺に寄せるなら山名変換推奨" },
-  "生藤山":     { lat: null, lng: null, elev: 990,  note: "奥多摩〜上野原（東京/山梨境界）の生藤山" },
+  const key = cacheKey(setKey);
+  const cached = safeJsonParse(localStorage.getItem(key));
 
-  // --- 表記ゆれ（山名変換したい場合の例） ---
-  // "川苔山": { lat:..., lng:..., elev:..., alias: "川乗山" },
-};
-
-
-export async function loadSetNames(setKey){
-  const def = SET_DEFS?.[setKey];
-  if (!def) return { names: [], meta: { cached: false, fetchedAt: nowIso() } };
-
-  const cached = loadCache(setKey);
-  if (cached){
-    return { names: cached.names, meta: { cached: true, fetchedAt: cached.fetchedAt } };
+  if (cached?.names?.length && cached?.fetchedAtMs && (nowMs() - cached.fetchedAtMs) < CACHE_TTL_MS) {
+    return {
+      names: cached.names,
+      meta: {
+        cached: true,
+        fetchedAt: cached.fetchedAt,
+        count: cached.names.length,
+      }
+    };
   }
 
-  const html = await fetchWikiHtml(def.page);
-  const doc = parseHtmlToDoc(html);
-  const names = extractNamesFromDoc(doc);
+  const html = await fetchWikiHtml(page);
+  const names = extractNamesFromWikiHtml(html, setKey);
 
-  // 壊れた抽出（標高列など）をキャッシュしないよう、最低件数を要求
-  const valid = names.filter(n => !isBadName(n));
-  if (valid.length >= 30) saveCache(setKey, valid);
+  const payload = {
+    setKey,
+    page,
+    fetchedAt: new Date().toISOString(),
+    fetchedAtMs: nowMs(),
+    names,
+  };
+  localStorage.setItem(key, JSON.stringify(payload));
 
-  return { names: valid, meta: { cached: false, fetchedAt: nowIso() } };
+  return {
+    names,
+    meta: { cached: false, fetchedAt: payload.fetchedAt, count: names.length }
+  };
+}
+
+/** デバッグ用途：キャッシュ削除 */
+export function clearSetCache(setKey) {
+  localStorage.removeItem(cacheKey(setKey));
 }
