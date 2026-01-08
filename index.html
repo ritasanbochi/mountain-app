@@ -6,6 +6,7 @@
 <title>登山向け山岳マップ</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<!-- favicon 404回避 -->
 <link rel="icon" href="data:,">
 
 <style>
@@ -560,7 +561,7 @@ function escapeHtml(s){
   }[c]));
 }
 function setStatusHtml(lines){
-  const safe = (lines || []).filter(Boolean).slice(0, 9).map(s => escapeHtml(s));
+  const safe = (lines || []).filter(Boolean).slice(0, 12).map(s => escapeHtml(s));
   setStatus.innerHTML = safe.join("<br>");
 }
 
@@ -737,6 +738,10 @@ function normName(s){
     .replace(/[（(].*?[）)]/g,"");
 }
 
+function isJapanLike(lat,lng){
+  return lat >= 24 && lat <= 46.5 && lng >= 122 && lng <= 146.5;
+}
+
 /* ===== master ===== */
 const byName = new Map();
 function upsertMountain(base){
@@ -791,9 +796,10 @@ function saveWikiCoordCache(){
   try { localStorage.setItem(WIKI_COORD_CACHE_KEY, JSON.stringify(wikiCoordCache)); } catch {}
 }
 
-function isJapanLike(lat,lng){
-  return lat >= 24 && lat <= 46.5 && lng >= 122 && lng <= 146.5;
-}
+/* ===== OSM Nominatim cache ===== */
+const OSM_CACHE_KEY = "mount_geo_osm_peak_v1";
+const osmCache = (() => { try { return JSON.parse(localStorage.getItem(OSM_CACHE_KEY)||"{}")||{}; } catch { return {}; } })();
+function saveOsmCache(){ try { localStorage.setItem(OSM_CACHE_KEY, JSON.stringify(osmCache)); } catch {} }
 
 /* ===== Open-Meteo Geocoding ===== */
 async function openMeteoGeocode(query){
@@ -811,6 +817,50 @@ async function openMeteoGeocode(query){
   return { lat, lng, elev };
 }
 
+/* ===== OSM Nominatim (peak優先) ===== */
+let _osmLast = 0;
+async function osmThrottle(ms=900){
+  const now = Date.now();
+  const wait = Math.max(0, (_osmLast + ms) - now);
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  _osmLast = Date.now();
+}
+
+async function osmGeocodePeak(name){
+  const key = normName(name);
+  if (!key) return null;
+
+  if (osmCache[key]) return { ...osmCache[key], source: "osm_cache" };
+
+  // peakを引きやすく「山」を付ける
+  const q = `${name} 山`;
+  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=10&countrycodes=jp&q=${encodeURIComponent(q)}`;
+
+  await osmThrottle(900);
+
+  const res = await fetch(url, {
+    headers: { "Accept":"application/json" }
+  });
+  if (!res.ok) throw new Error(`osm ${res.status}`);
+  const j = await res.json();
+  if (!Array.isArray(j) || j.length === 0) return null;
+
+  const pick =
+    j.find(x => x.class === "natural" && x.type === "peak") ||
+    j.find(x => String(x.type || "").includes("peak")) ||
+    j[0];
+
+  const lat = Number(pick.lat);
+  const lng = Number(pick.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (!isJapanLike(lat, lng)) return null;
+
+  const got = { lat, lng, elev: null };
+  osmCache[key] = got;
+  saveOsmCache();
+  return { ...got, source: "osm" };
+}
+
 /* ===== Wikipedia coords: まとめて取得 ===== */
 function chunk(arr, size){
   const out = [];
@@ -819,7 +869,6 @@ function chunk(arr, size){
 }
 
 async function fetchWikiCoordsBatch(titles){
-  // titles: string[]  (max 50 recommended)
   const filtered = (titles || []).map(t => String(t||"").trim()).filter(Boolean);
   if (!filtered.length) return new Map();
 
@@ -856,33 +905,33 @@ async function fetchWikiCoordsBatch(titles){
 function buildTitleCandidates(name){
   const n = String(name || "").trim();
   const cands = [];
+
   cands.push(n);
 
+  // “峠”は代表峰へ寄せる候補
   if (n.endsWith("峠")) cands.push(n.replace(/峠$/, "嶺"));
 
-  // ヶ/ケ ゆれ
+  // ヶ/ケゆれ
   cands.push(n.replace(/ケ/g, "ヶ"));
   cands.push(n.replace(/ヶ/g, "ケ"));
 
   // 末尾が山っぽくないなら山を付ける
   if (!/[山岳峰嶺]$/.test(n)) cands.push(n + "山");
 
-  // 曖昧さ回避で (日本)
+  // 曖昧さ回避
   cands.push(n + " (日本)");
 
-  // 重複除去
   return [...new Set(cands)].filter(Boolean);
 }
 
 /* ===== 山名群を Wikipedia で “バッチで” 解決 ===== */
 async function resolveGeoManyByWiki(names){
-  // names: string[]
   // 戻り: Map<origName, {lat,lng,elev,source, wikiTitle?}>
   const result = new Map();
   const need = (names || []).map(n => String(n||"").trim()).filter(Boolean);
   if (!need.length) return result;
 
-  // 既にcacheあるものは即返し
+  // cache命中は即返し
   const still = [];
   for (const n of need){
     const k = normName(n);
@@ -895,19 +944,15 @@ async function resolveGeoManyByWiki(names){
   }
   if (!still.length) return result;
 
-  // 1st pass: そのままのタイトルだけで一括
+  // 1st pass: そのままタイトルで一括
   const pass1 = still.map(n => n);
   for (const part of chunk(pass1, 50)){
     let map;
-    try{
-      map = await fetchWikiCoordsBatch(part);
-    }catch{
-      map = new Map();
-    }
+    try{ map = await fetchWikiCoordsBatch(part); }
+    catch{ map = new Map(); }
+
     for (const orig of part){
       if (result.has(orig)) continue;
-      // 返ってくるキーは “title” だが redirects で名前が変わってる可能性がある
-      // なので part 内の “orig” 文字列そのものが hit するケースを優先する
       const direct = map.get(orig);
       if (direct){
         const k = normName(orig);
@@ -918,11 +963,10 @@ async function resolveGeoManyByWiki(names){
     saveWikiCoordCache();
   }
 
-  // 2nd pass: 候補タイトルを増やして alias 解決（残りだけ）
+  // 2nd pass: 候補タイトルで補完
   const remain = still.filter(n => !result.has(n));
   if (!remain.length) return result;
 
-  // orig -> candidates
   const pairs = [];
   const allTitles = [];
   for (const orig of remain){
@@ -933,24 +977,17 @@ async function resolveGeoManyByWiki(names){
     }
   }
 
-  // 重複除去（タイトル側）
   const uniqTitles = [...new Set(allTitles)];
-
-  // タイトル→coord をまとめて取る
   const titleToCoord = new Map();
   for (const part of chunk(uniqTitles, 50)){
     let map;
-    try{
-      map = await fetchWikiCoordsBatch(part);
-    }catch{
-      map = new Map();
-    }
+    try{ map = await fetchWikiCoordsBatch(part); }
+    catch{ map = new Map(); }
     for (const [title, coord] of map.entries()){
       titleToCoord.set(title, coord);
     }
   }
 
-  // orig に最初にヒットした候補を割り当て
   for (const [orig, t] of pairs){
     if (result.has(orig)) continue;
     const coord = titleToCoord.get(t);
@@ -985,7 +1022,7 @@ async function resolveGeoSingle(name){
   const wc = wikiCoordCache?.[key];
   if (wc?.lat != null && wc?.lng != null) return { ...wc, source:"wiki_cache" };
 
-  // ④ Open-Meteo（最後の保険）
+  // ④ Open-Meteo（保険）
   if (geoCache[key]) return { ...geoCache[key], source:"cache" };
 
   const tries = [name, `${name} 日本`, `${name} 山 日本`];
@@ -999,6 +1036,13 @@ async function resolveGeoSingle(name){
       }
     }catch{}
   }
+
+  // ⑤ OSM Nominatim（peak狙い）
+  try{
+    const o = await osmGeocodePeak(name);
+    if (o) return o;
+  }catch{}
+
   return null;
 }
 
@@ -1128,24 +1172,31 @@ async function resolveForEnabledSets(){
     `（対象残り: ${pending.length}件）`
   ]);
 
-  // ★ まず “座標が無い” 山だけ集めて Wikipedia をバッチ解決
+  // まず “座標が無い” 山だけ集めてWikipediaをバッチ解決
   const needGeo = batch.filter(m => m.lat == null || m.lng == null).map(m => m.name);
   let wikiResolved = new Map();
-  try{
-    wikiResolved = await resolveGeoManyByWiki(needGeo);
-  }catch{
-    wikiResolved = new Map();
+  try{ wikiResolved = await resolveGeoManyByWiki(needGeo); }
+  catch{ wikiResolved = new Map(); }
+
+  // Wikipediaで埋まらない分をOSMで補完（未解決だけ）
+  const stillNeed = needGeo.filter(n => !wikiResolved.has(n));
+  const osmResolved = new Map();
+  for (const n of stillNeed){
+    try{
+      const o = await osmGeocodePeak(n);
+      if (o) osmResolved.set(n, o);
+    }catch{}
   }
 
   for (const m of batch){
     try{
       if (m.lat == null || m.lng == null){
-        const w = wikiResolved.get(m.name);
+        const w = wikiResolved.get(m.name) || osmResolved.get(m.name);
         if (w){
           m.lat = w.lat; m.lng = w.lng;
           okGeo++;
         }else{
-          // 保険で単発解決（override/manual/Open-Meteo）
+          // 最後の保険（override/manual/Open-Meteo/OSM単発）
           const g = await resolveGeoSingle(m.name);
           if (!g){
             ngGeo++;
@@ -1186,7 +1237,7 @@ async function resolveForEnabledSets(){
   lines.push(`残り（未解決）: ${remaining}件 ※もう一度操作で続きを処理`);
   if (ngNames.length){
     lines.push(`座標NG例: ${ngNames.join(" / ")}`);
-    lines.push(`（対策: 原則自動。残ったら座標修正で最小限だけ手入力）`);
+    lines.push(`（対策: 自動解決優先。残ったら座標修正で最小限だけ手入力）`);
   }
   setStatusHtml(lines);
 }
@@ -1528,9 +1579,8 @@ btnSave.onclick = async () => {
     addMarkerForMountain(m);
 
     if (!m.weather || Object.keys(m.weather).length === 0){
-      try{
-        m.weather = await generateWeatherScore(m.name, m.lat, m.lng, m.level, m.elev);
-      }catch{}
+      try{ m.weather = await generateWeatherScore(m.name, m.lat, m.lng, m.level, m.elev); }
+      catch{}
     }
   }
 
@@ -1550,7 +1600,6 @@ btnDelete.onclick = () => {
   saveManualOverrides(manualOverrides);
 
   inLat.value = ""; inLng.value = ""; inElev.value = ""; inNote.value = "";
-
   refreshCoordList();
   updateView();
   setStatusHtml([`🗑️ 手動座標を削除: ${selectedCoordKey}`]);
@@ -1604,7 +1653,7 @@ async function init(){
   initDaySelectLabels();
   if (Number(daySelect.value) === 0) setSliderIndex(nearestTimeSlotIndexNow());
 
-  // 百名山は先に天気生成
+  // 百名山は先に天気生成（既に座標あるもの）
   const baseList = [...byName.values()].filter(m => m._sets?.has("HYAKU") && m.lat != null && m.lng != null);
   await Promise.all(baseList.map(async m => {
     if (!m.weather || Object.keys(m.weather).length === 0){
