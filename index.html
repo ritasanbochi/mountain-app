@@ -6,7 +6,6 @@
 <title>登山向け山岳マップ</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
-<!-- favicon 404 を黙らせたい場合（任意） -->
 <link rel="icon" href="data:,">
 
 <style>
@@ -33,6 +32,28 @@
     border-radius:10px;
     background:#fff;
   }
+
+  .btn{
+    appearance:none;
+    border:1px solid #cfcfcf;
+    background:#fff;
+    padding:6px 10px;
+    border-radius:10px;
+    font-size:13px;
+    cursor:pointer;
+  }
+  .btn:hover{ background:#f7f7f7; }
+  .btn:active{ transform: translateY(1px); }
+  .chip{
+    display:inline-block;
+    padding:1px 8px;
+    border-radius:999px;
+    background:#eef6ff;
+    border:1px solid #b7d7ff;
+    font-size:12px;
+    margin-left:6px;
+  }
+  .chip.bad{ background:#fff0f0; border-color:#e0a3a3; }
 
   #container{ height:calc(100vh - 120px); position:relative; }
   #map{ height:100%; width:100%; }
@@ -80,6 +101,7 @@
   hr{ border:none; border-top:1px solid #ddd; margin:8px 0; }
   small{ color:#555; }
 
+  /* ===== detail overlay ===== */
   #detailOverlay{
     position:fixed;
     inset:0;
@@ -178,6 +200,7 @@
   .score-grid .b{ background:#fff7db; }
   .score-grid .c{ background:#ffe7e7; }
 
+  /* ===== mobile list ===== */
   #listHeader{ display:none; }
   #listTab{ display:none; }
 
@@ -245,6 +268,118 @@
     }
     #listTab.hidden{ display:none; }
   }
+
+  /* ===== coord editor overlay ===== */
+  #coordOverlay{
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,0.35);
+    z-index:9998;
+    display:none;
+  }
+  #coordOverlay.show{ display:block; }
+
+  #coordPanel{
+    position:absolute;
+    inset:0;
+    background:#fff;
+    display:flex;
+    flex-direction:column;
+  }
+  #coordHeader{
+    position:sticky;
+    top:0;
+    background:#fff;
+    border-bottom:1px solid #ddd;
+    padding:10px 12px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+  }
+  #coordHeader b{ font-size:16px; }
+  #coordClose{
+    appearance:none;
+    border:1px solid #ccc;
+    background:#f7f7f7;
+    padding:6px 10px;
+    border-radius:8px;
+    font-size:14px;
+  }
+  #coordBody{
+    padding:12px;
+    overflow:auto;
+    -webkit-overflow-scrolling:touch;
+    line-height:1.4;
+  }
+  @media (min-width:769px){
+    #coordPanel{
+      inset:auto;
+      top:24px; left:50%;
+      transform:translateX(-50%);
+      width:min(980px, calc(100vw - 48px));
+      height:min(86vh, 900px);
+      border-radius:14px;
+      box-shadow:0 14px 40px rgba(0,0,0,0.24);
+    }
+  }
+
+  .coord-grid{
+    display:grid;
+    grid-template-columns: 1.2fr 1fr;
+    gap:12px;
+  }
+  @media (max-width:900px){
+    .coord-grid{ grid-template-columns: 1fr; }
+  }
+
+  .card{
+    border:1px solid #ddd;
+    border-radius:12px;
+    padding:10px;
+    background:#fff;
+  }
+  .card h3{
+    margin:0 0 6px 0;
+    font-size:14px;
+  }
+  .coord-list{
+    max-height: 52vh;
+    overflow:auto;
+    border:1px solid #eee;
+    border-radius:10px;
+  }
+  .coord-item{
+    padding:8px 10px;
+    border-bottom:1px solid #eee;
+    cursor:pointer;
+  }
+  .coord-item:hover{ background:#f7fbff; }
+  .coord-item.active{ background:#eef6ff; font-weight:700; }
+
+  .form-row{
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+    align-items:center;
+    margin:8px 0;
+  }
+  .form-row label{
+    font-size:12px;
+    color:#333;
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+    min-width: 160px;
+  }
+  .form-row input, .form-row textarea{
+    border:1px solid #ccc;
+    border-radius:10px;
+    padding:8px 10px;
+    font-size:13px;
+  }
+  .form-row textarea{ width:100%; min-height:70px; }
+  .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; }
 </style>
 </head>
 
@@ -288,6 +423,11 @@
   </div>
 
   <div class="group">
+    <button id="openCoord" class="btn" type="button">座標修正</button>
+    <span id="coordCount" class="chip bad" style="display:none;"></span>
+  </div>
+
+  <div class="group">
     <span id="setStatus" style="font-size:12px;color:#444; max-width: 72vw;"></span>
   </div>
 </div>
@@ -309,6 +449,7 @@
 
 <button id="listTab" class="hidden" type="button">山リスト</button>
 
+<!-- Detail overlay -->
 <div id="detailOverlay" aria-hidden="true">
   <div id="detailPanel" role="dialog" aria-modal="true" aria-label="山の詳細">
     <div id="detailHeader">
@@ -316,6 +457,84 @@
       <button id="detailClose" type="button">閉じる</button>
     </div>
     <div id="detailBody"></div>
+  </div>
+</div>
+
+<!-- Coord editor overlay -->
+<div id="coordOverlay" aria-hidden="true">
+  <div id="coordPanel" role="dialog" aria-modal="true" aria-label="座標修正">
+    <div id="coordHeader">
+      <b>座標修正（座標NG/手動override）</b>
+      <button id="coordClose" type="button">閉じる</button>
+    </div>
+    <div id="coordBody">
+      <div class="coord-grid">
+        <div class="card">
+          <h3>座標未解決リスト</h3>
+          <div class="form-row">
+            <label style="min-width:260px;">
+              絞り込み（山名）
+              <input id="coordFilter" type="text" placeholder="例: 奥多摩 / 三頭山 など">
+            </label>
+            <button id="refreshCoordList" class="btn" type="button">更新</button>
+          </div>
+          <div id="coordList" class="coord-list"></div>
+          <small>※ ここに「座標NG例」や未解決の山が溜まります。クリックして右で入力。</small>
+        </div>
+
+        <div class="card">
+          <h3>選択中の山</h3>
+          <div id="coordSelected" class="mono" style="margin-bottom:8px;">（未選択）</div>
+
+          <div class="form-row">
+            <label>
+              緯度（lat）
+              <input id="inLat" type="number" step="0.000001" placeholder="例: 35.123456">
+            </label>
+            <label>
+              経度（lng）
+              <input id="inLng" type="number" step="0.000001" placeholder="例: 139.123456">
+            </label>
+            <label>
+              標高（m / 任意）
+              <input id="inElev" type="number" step="1" placeholder="例: 1531">
+            </label>
+          </div>
+
+          <div class="form-row" style="align-items:flex-start;">
+            <label style="min-width:100%;">
+              メモ（任意）
+              <textarea id="inNote" placeholder="例: 奥多摩の三頭山（都民の森付近）"></textarea>
+            </label>
+          </div>
+
+          <div class="form-row">
+            <button id="saveOverride" class="btn" type="button">保存</button>
+            <button id="deleteOverride" class="btn" type="button">削除</button>
+            <button id="zoomTo" class="btn" type="button">地図へズーム</button>
+          </div>
+
+          <hr>
+
+          <h3>JSON（バックアップ/移行）</h3>
+          <div class="form-row" style="align-items:flex-start;">
+            <label style="min-width:100%;">
+              Export / Import
+              <textarea id="overrideJson" class="mono" placeholder="ここに表示されます / ここに貼ってインポート"></textarea>
+            </label>
+          </div>
+          <div class="form-row">
+            <button id="exportOverrides" class="btn" type="button">Export</button>
+            <button id="importOverrides" class="btn" type="button">Import</button>
+            <button id="clearOverrides" class="btn" type="button">全消去</button>
+          </div>
+
+          <small>
+            入力元のおすすめ：国土地理院地図 / YAMAP / ヤマレコなどで山頂をクリックして緯度経度（10進）をコピー。
+          </small>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -335,9 +554,13 @@ const timeLabel = document.getElementById("timeLabel");
 const daySelect = document.getElementById("day");
 const setStatus = document.getElementById("setStatus");
 
+function escapeHtml(s){
+  return String(s ?? "").replace(/[&<>"']/g, c => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+  }[c]));
+}
 function setStatusHtml(lines){
-  // lines: string[]
-  const safe = (lines || []).filter(Boolean).slice(0, 8).map(s => escapeHtml(s));
+  const safe = (lines || []).filter(Boolean).slice(0, 9).map(s => escapeHtml(s));
   setStatus.innerHTML = safe.join("<br>");
 }
 
@@ -424,11 +647,6 @@ const icons = { A:icon("green"), B:icon("yellow"), C:icon("red") };
 const scorePriority = { A:3, B:2, C:1 };
 
 /* ===== utils ===== */
-function escapeHtml(s){
-  return String(s ?? "").replace(/[&<>"']/g, c => ({
-    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
-  }[c]));
-}
 function fmt(n, digits=1){
   if (n === null || n === undefined) return "-";
   const v = Number(n);
@@ -539,11 +757,25 @@ function upsertMountain(base){
 }
 mountains.forEach(m => upsertMountain({ ...m, _sets:["HYAKU"] }));
 
-/* ===== セットロード管理（山名だけ） ===== */
+/* ===== セットロード管理 ===== */
 const loadedSetKeys = new Set();
-const setLoadInfo = new Map(); // setKey -> {count, cached}
 
-/* ===== Geocoding（Open-Meteo） + overrides ===== */
+/* ===== 手動override（localStorage） ===== */
+const MANUAL_OVR_KEY = "mount_geo_manual_overrides_v1";
+function loadManualOverrides(){
+  try{
+    const obj = JSON.parse(localStorage.getItem(MANUAL_OVR_KEY) || "{}");
+    return (obj && typeof obj === "object") ? obj : {};
+  }catch{
+    return {};
+  }
+}
+function saveManualOverrides(obj){
+  try{ localStorage.setItem(MANUAL_OVR_KEY, JSON.stringify(obj)); }catch{}
+}
+let manualOverrides = loadManualOverrides();
+
+/* ===== geocoding cache ===== */
 const GEO_CACHE_KEY = "mount_geo_openmeteo_v2";
 const geoCache = (() => { try { return JSON.parse(localStorage.getItem(GEO_CACHE_KEY)||"{}")||{}; } catch { return {}; } })();
 function saveGeoCache(){ try { localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(geoCache)); } catch {} }
@@ -569,12 +801,22 @@ async function resolveGeo(name){
   const key = normName(name);
   if (!key) return null;
 
+  // ① 手動override（最優先）
+  const mo = manualOverrides?.[key] || manualOverrides?.[name];
+  if (mo?.lat != null && mo?.lng != null){
+    return { lat:Number(mo.lat), lng:Number(mo.lng), elev:(mo.elev!=null?Number(mo.elev):null), source:"manual" };
+  }
+
+  // ② 固定override（mountaimSets.js）
   const ov = GEO_OVERRIDES?.[name] || GEO_OVERRIDES?.[key];
-  if (ov?.lat && ov?.lng){
+  if (ov?.lat != null && ov?.lng != null){
     return { lat:Number(ov.lat), lng:Number(ov.lng), elev:(ov.elev!=null?Number(ov.elev):null), source:"override" };
   }
+
+  // ③ キャッシュ
   if (geoCache[key]) return { ...geoCache[key], source:"cache" };
 
+  // ④ geocoding
   const tries = [name, `${name} 日本`, `${name} 山 日本`];
   for (const q of tries){
     try{
@@ -632,14 +874,13 @@ function mountainInSelectedSets(m, sets){
   return sets.some(s => ms.has(s));
 }
 
-/* ===== 追加セット（山名）を byName に投入 ===== */
+/* ===== セット（山名）投入 ===== */
 async function ensureSetLoaded(setKey){
   if (setKey === "HYAKU") return;
   if (loadedSetKeys.has(setKey)) return;
   if (!SET_DEFS?.[setKey]) return;
 
   setStatusHtml([`${setLabel(setKey)}: 山名取得中...`]);
-
   const { names, meta } = await loadSetNames(setKey);
 
   for (const name of names){
@@ -662,17 +903,29 @@ async function ensureSetLoaded(setKey){
   }
 
   loadedSetKeys.add(setKey);
-  setLoadInfo.set(setKey, { count: names.length, cached: !!meta?.cached });
+  setStatusHtml([`✅ ${setLabel(setKey)} ロード完了: ${names.length}件（${meta?.cached ? "cache" : "fresh"}）`]);
+}
 
-  // ✅ デバッグ：ロード件数表示
-  const lines = [];
-  lines.push(`✅ ${setLabel(setKey)} ロード完了: ${names.length}件（${meta?.cached ? "cache" : "fresh"}）`);
-  const selected = getState().sets.filter(s => s !== "HYAKU");
-  if (selected.length){
-    lines.push(`選択中: ${selected.map(setLabel).join(" / ")}`);
-    lines.push(`ロード済: ${[...loadedSetKeys].map(setLabel).join(" / ")}`);
+/* ===== 座標NGを溜める（手動入力候補リスト） ===== */
+const pendingGeoSet = new Set(); // normName
+function addPendingGeoName(name){
+  const k = normName(name);
+  if (!k) return;
+  // すでに手動overrideがあるなら候補に入れない
+  if (manualOverrides?.[k]?.lat != null && manualOverrides?.[k]?.lng != null) return;
+  pendingGeoSet.add(k);
+  refreshCoordBadge();
+}
+
+function refreshCoordBadge(){
+  const chip = document.getElementById("coordCount");
+  const count = pendingGeoSet.size;
+  if (count > 0){
+    chip.style.display = "inline-block";
+    chip.textContent = `座標未解決 ${count}`;
+  }else{
+    chip.style.display = "none";
   }
-  setStatusHtml(lines);
 }
 
 /* ===== 追加処理（座標→天気→マーカー） + デバッグ ===== */
@@ -713,6 +966,7 @@ async function resolveForEnabledSets(){
         if (!g){
           ngGeo++;
           if (ngNames.length < 10) ngNames.push(m.name);
+          addPendingGeoName(m.name);
           continue;
         }
         m.lat = g.lat; m.lng = g.lng;
@@ -735,24 +989,24 @@ async function resolveForEnabledSets(){
     }catch{
       ngGeo++;
       if (ngNames.length < 10) ngNames.push(m.name);
+      addPendingGeoName(m.name);
     }
   }
 
   resolving = false;
 
   const remaining = pending.length - batch.length;
-
   const lines = [];
   lines.push(`追加処理: 座標OK${okGeo}/NG${ngGeo} 天気OK${okWx}/NG${ngWx}`);
   lines.push(`残り（未解決）: ${remaining}件  ※もう一度操作で続きを処理`);
   if (ngNames.length){
     lines.push(`座標NG例: ${ngNames.join(" / ")}`);
-    lines.push(`（対策: GEO_OVERRIDES 追記 or 山名の表記ゆれ対応）`);
+    lines.push(`（対策: 座標修正で手入力→保存）`);
   }
   setStatusHtml(lines);
 }
 
-/* ===== 詳細 ===== */
+/* ===== Detail ===== */
 const detailOverlay = document.getElementById("detailOverlay");
 const detailTitle = document.getElementById("detailTitle");
 const detailBody = document.getElementById("detailBody");
@@ -788,10 +1042,9 @@ function detailHtml(m, selectedTime){
     <div class="popup">
       <b>${escapeHtml(m.name)}</b>${setPills}<br>
       標高：${m.elev ?? "-"} m / 難易度：${escapeHtml(m.level)}<br>
+      <small>座標: ${m.lat?.toFixed?.(5) ?? "-"}, ${m.lng?.toFixed?.(5) ?? "-"}</small>
 
-      <hr>
-      ${grid}
-
+      <hr>${grid}
       <hr>
       <b>${escapeHtml(dayLabel(day))} の根拠（時間帯別）</b><br>
       <table class="wx-table">
@@ -802,7 +1055,6 @@ function detailHtml(m, selectedTime){
         </thead>
         <tbody>${rows}</tbody>
       </table>
-      <small>※ 風/突風/気温は「中腹→山頂」</small>
     </div>
   `;
 }
@@ -830,7 +1082,7 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && detailOverlay.classList.contains("show")) closeDetail();
 });
 
-/* ===== リスト ===== */
+/* ===== Mobile list ===== */
 const listEl = document.getElementById("list");
 const listHeaderEl = document.getElementById("listHeader");
 const listBodyEl = document.getElementById("listBody");
@@ -881,6 +1133,8 @@ function initMobileListGestures(){
     setListCollapsed(isMobile() ? listCollapsed : false);
   });
 }
+
+/* ===== List render ===== */
 function drawList(items, day){
   const target = isMobile() ? listBodyEl : listEl;
 
@@ -965,6 +1219,216 @@ function updateView(){
   setTimeout(() => map.invalidateSize(), 60);
 }
 
+/* ===== 座標修正UI ===== */
+const coordOverlay = document.getElementById("coordOverlay");
+const coordClose = document.getElementById("coordClose");
+const openCoord = document.getElementById("openCoord");
+const coordListEl = document.getElementById("coordList");
+const coordFilterEl = document.getElementById("coordFilter");
+const coordSelectedEl = document.getElementById("coordSelected");
+const inLat = document.getElementById("inLat");
+const inLng = document.getElementById("inLng");
+const inElev = document.getElementById("inElev");
+const inNote = document.getElementById("inNote");
+const btnSave = document.getElementById("saveOverride");
+const btnDelete = document.getElementById("deleteOverride");
+const btnZoomTo = document.getElementById("zoomTo");
+const btnRefreshCoordList = document.getElementById("refreshCoordList");
+const taJson = document.getElementById("overrideJson");
+const btnExport = document.getElementById("exportOverrides");
+const btnImport = document.getElementById("importOverrides");
+const btnClear = document.getElementById("clearOverrides");
+
+let selectedCoordKey = null;
+
+function openCoordPanel(){
+  refreshCoordList();
+  coordOverlay.classList.add("show");
+  coordOverlay.setAttribute("aria-hidden","false");
+  document.body.style.overflow = "hidden";
+}
+function closeCoordPanel(){
+  coordOverlay.classList.remove("show");
+  coordOverlay.setAttribute("aria-hidden","true");
+  document.body.style.overflow = "";
+}
+openCoord.onclick = openCoordPanel;
+coordClose.onclick = closeCoordPanel;
+coordOverlay.addEventListener("click", (e) => {
+  if (e.target === coordOverlay) closeCoordPanel();
+});
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && coordOverlay.classList.contains("show")) closeCoordPanel();
+});
+
+function getUnresolvedNames(){
+  // ① pendingGeoSet（直近のNG）
+  const names = new Set([...pendingGeoSet]);
+
+  // ② 選択セットで「座標なし」のものも候補に
+  const { sets } = getState();
+  for (const m of byName.values()){
+    if (!mountainInSelectedSets(m, sets)) continue;
+    const k = normName(m.name);
+    if (!k) continue;
+    if (m.lat == null || m.lng == null){
+      // ただし手動overrideが既にあるなら候補から外す
+      const mo = manualOverrides?.[k];
+      if (!(mo?.lat != null && mo?.lng != null)) names.add(k);
+    }
+  }
+
+  // ③ 既に手動overrideがあるものも編集対象に含める（一覧の後半に）
+  for (const k of Object.keys(manualOverrides || {})){
+    names.add(k);
+  }
+
+  return [...names].sort((a,b) => a.localeCompare(b, "ja"));
+}
+
+function refreshCoordList(){
+  const q = (coordFilterEl.value || "").trim();
+  const all = getUnresolvedNames();
+  const filtered = q ? all.filter(n => n.includes(q)) : all;
+
+  coordListEl.innerHTML = "";
+  filtered.forEach(k => {
+    const div = document.createElement("div");
+    div.className = "coord-item" + (k === selectedCoordKey ? " active" : "");
+    const mo = manualOverrides?.[k];
+    const status = (mo?.lat != null && mo?.lng != null) ? "✅" : "⚠️";
+    div.textContent = `${status} ${k}`;
+    div.onclick = () => selectCoordKey(k);
+    coordListEl.appendChild(div);
+  });
+
+  refreshCoordBadge();
+}
+
+function selectCoordKey(k){
+  selectedCoordKey = k;
+
+  // 表示用の元山名（byNameにあるならそれ）
+  const m = byName.get(k);
+  const displayName = m?.name || k;
+
+  const mo = manualOverrides?.[k] || {};
+  coordSelectedEl.textContent = `山名: ${displayName}\nkey: ${k}`;
+
+  inLat.value = (mo.lat ?? "");
+  inLng.value = (mo.lng ?? "");
+  inElev.value = (mo.elev ?? "");
+  inNote.value = (mo.note ?? "");
+
+  refreshCoordList();
+}
+
+coordFilterEl.addEventListener("input", () => refreshCoordList());
+btnRefreshCoordList.onclick = () => refreshCoordList();
+
+function tryGetSelectedMountain(){
+  if (!selectedCoordKey) return null;
+  return byName.get(selectedCoordKey) || null;
+}
+
+btnSave.onclick = async () => {
+  if (!selectedCoordKey) return;
+
+  const lat = Number(inLat.value);
+  const lng = Number(inLng.value);
+  const elev = (inElev.value === "" ? null : Number(inElev.value));
+  const note = (inNote.value || "").trim();
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)){
+    alert("緯度・経度は数値で入力してね");
+    return;
+  }
+
+  manualOverrides[selectedCoordKey] = { lat, lng, elev, note };
+  saveManualOverrides(manualOverrides);
+
+  // byName 側に即反映
+  const m = tryGetSelectedMountain();
+  if (m){
+    m.lat = lat; m.lng = lng;
+    if (elev != null && Number.isFinite(elev)) m.elev = Math.round(elev);
+    addMarkerForMountain(m);
+
+    // 天気が未取得なら取る（軽く）
+    if (!m.weather || Object.keys(m.weather).length === 0){
+      try{
+        m.weather = await generateWeatherScore(m.name, m.lat, m.lng, m.level, m.elev);
+      }catch{}
+    }
+  }
+
+  // pendingから除外
+  pendingGeoSet.delete(selectedCoordKey);
+  refreshCoordBadge();
+  refreshCoordList();
+  updateView();
+
+  setStatusHtml([`✅ 手動座標を保存: ${selectedCoordKey}`]);
+};
+
+btnDelete.onclick = () => {
+  if (!selectedCoordKey) return;
+  if (!confirm(`手動座標を削除しますか？\n${selectedCoordKey}`)) return;
+
+  delete manualOverrides[selectedCoordKey];
+  saveManualOverrides(manualOverrides);
+
+  inLat.value = ""; inLng.value = ""; inElev.value = ""; inNote.value = "";
+
+  refreshCoordList();
+  updateView();
+  setStatusHtml([`🗑️ 手動座標を削除: ${selectedCoordKey}`]);
+};
+
+btnZoomTo.onclick = () => {
+  if (!selectedCoordKey) return;
+  const mo = manualOverrides?.[selectedCoordKey];
+  const m = tryGetSelectedMountain();
+  const lat = (mo?.lat != null) ? Number(mo.lat) : (m?.lat);
+  const lng = (mo?.lng != null) ? Number(mo.lng) : (m?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)){
+    alert("まだ座標がありません（先に保存してください）");
+    return;
+  }
+  closeCoordPanel();
+  map.setView([lat, lng], 12);
+};
+
+btnExport.onclick = () => {
+  taJson.value = JSON.stringify(manualOverrides || {}, null, 2);
+  taJson.focus();
+  taJson.select();
+};
+
+btnImport.onclick = () => {
+  try{
+    const obj = JSON.parse(taJson.value || "{}");
+    if (!obj || typeof obj !== "object") throw new Error("invalid");
+    // マージ
+    manualOverrides = { ...(manualOverrides || {}), ...obj };
+    saveManualOverrides(manualOverrides);
+    refreshCoordList();
+    updateView();
+    setStatusHtml([`✅ Import完了（手動座標:${Object.keys(manualOverrides).length}件）`]);
+  }catch{
+    alert("JSONの形式が正しくないです");
+  }
+};
+
+btnClear.onclick = () => {
+  if (!confirm("手動座標を全消去しますか？")) return;
+  manualOverrides = {};
+  saveManualOverrides(manualOverrides);
+  refreshCoordList();
+  updateView();
+  setStatusHtml([`🗑️ 手動座標を全消去しました`]);
+};
+
 /* ===== init ===== */
 async function init(){
   initDaySelectLabels();
@@ -987,12 +1451,14 @@ async function init(){
       for (const s of sets) await ensureSetLoaded(s);
       await resolveForEnabledSets();
       updateView();
+      refreshCoordBadge();
     });
   });
 
   initMobileListGestures();
   setListCollapsed(isMobile() ? true : false);
 
+  refreshCoordBadge();
   setStatusHtml([`初期化完了（百名山:${baseList.length}座）`]);
   updateView();
 }
