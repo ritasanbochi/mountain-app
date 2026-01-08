@@ -775,14 +775,14 @@ function saveManualOverrides(obj){
 }
 let manualOverrides = loadManualOverrides();
 
-/* ===== geocoding cache (Open-Meteo) ===== */
+/* ===== Open-Meteo geocoding cache ===== */
 const GEO_CACHE_KEY = "mount_geo_openmeteo_v2";
 const geoCache = (() => { try { return JSON.parse(localStorage.getItem(GEO_CACHE_KEY)||"{}")||{}; } catch { return {}; } })();
 function saveGeoCache(){ try { localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(geoCache)); } catch {} }
 
-/* ===== Wikipedia座標cache ===== */
+/* ===== Wikipedia batch coord cache ===== */
 const WIKI_API = "https://ja.wikipedia.org/w/api.php";
-const WIKI_COORD_CACHE_KEY = "mount_wiki_coord_cache_v1";
+const WIKI_COORD_CACHE_KEY = "mount_wiki_coord_cache_v2";
 const wikiCoordCache = (() => {
   try { return JSON.parse(localStorage.getItem(WIKI_COORD_CACHE_KEY) || "{}") || {}; }
   catch { return {}; }
@@ -811,12 +811,17 @@ async function openMeteoGeocode(query){
   return { lat, lng, elev };
 }
 
-/* ===== Wikipedia座標取得 ===== */
-async function fetchWikiCoord(title){
-  const key = normName(title);
-  if (!key) return null;
+/* ===== Wikipedia coords: まとめて取得 ===== */
+function chunk(arr, size){
+  const out = [];
+  for (let i=0;i<arr.length;i+=size) out.push(arr.slice(i,i+size));
+  return out;
+}
 
-  if (wikiCoordCache[key]) return { ...wikiCoordCache[key], source: "wiki_cache" };
+async function fetchWikiCoordsBatch(titles){
+  // titles: string[]  (max 50 recommended)
+  const filtered = (titles || []).map(t => String(t||"").trim()).filter(Boolean);
+  if (!filtered.length) return new Map();
 
   const params = new URLSearchParams({
     action: "query",
@@ -825,37 +830,34 @@ async function fetchWikiCoord(title){
     redirects: "1",
     prop: "coordinates",
     colimit: "1",
-    titles: title
+    titles: filtered.join("|")
   });
 
   const url = `${WIKI_API}?${params.toString()}`;
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`wiki coord ${res.status}`);
+  if (!res.ok) throw new Error(`wiki batch ${res.status}`);
   const j = await res.json();
   const pages = j?.query?.pages;
-  if (!pages) return null;
+  const map = new Map();
+  if (!pages) return map;
 
-  const page = Object.values(pages)[0];
-  const c = page?.coordinates?.[0];
-  if (!c) return null;
-
-  const lat = Number(c.lat);
-  const lng = Number(c.lon);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-
-  const got = { lat, lng, elev: null };
-  wikiCoordCache[key] = got;
-  saveWikiCoordCache();
-  return { ...got, source: "wiki" };
+  for (const p of Object.values(pages)){
+    const title = p?.title;
+    const c = p?.coordinates?.[0];
+    if (!title || !c) continue;
+    const lat = Number(c.lat);
+    const lng = Number(c.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    map.set(title, { lat, lng, elev: null, source: "wiki_batch" });
+  }
+  return map;
 }
 
 function buildTitleCandidates(name){
   const n = String(name || "").trim();
   const cands = [];
-
   cands.push(n);
 
-  // “峠” は山頂記事に寄せると取れることがある
   if (n.endsWith("峠")) cands.push(n.replace(/峠$/, "嶺"));
 
   // ヶ/ケ ゆれ
@@ -865,15 +867,105 @@ function buildTitleCandidates(name){
   // 末尾が山っぽくないなら山を付ける
   if (!/[山岳峰嶺]$/.test(n)) cands.push(n + "山");
 
-  // “(日本)” の曖昧さ回避（記事名がこうなってる場合がある）
+  // 曖昧さ回避で (日本)
   cands.push(n + " (日本)");
 
   // 重複除去
   return [...new Set(cands)].filter(Boolean);
 }
 
-/* ===== resolveGeo（自動化の本体） ===== */
-async function resolveGeo(name){
+/* ===== 山名群を Wikipedia で “バッチで” 解決 ===== */
+async function resolveGeoManyByWiki(names){
+  // names: string[]
+  // 戻り: Map<origName, {lat,lng,elev,source, wikiTitle?}>
+  const result = new Map();
+  const need = (names || []).map(n => String(n||"").trim()).filter(Boolean);
+  if (!need.length) return result;
+
+  // 既にcacheあるものは即返し
+  const still = [];
+  for (const n of need){
+    const k = normName(n);
+    const cached = wikiCoordCache[k];
+    if (cached?.lat != null && cached?.lng != null){
+      result.set(n, { ...cached, source: "wiki_cache" });
+    }else{
+      still.push(n);
+    }
+  }
+  if (!still.length) return result;
+
+  // 1st pass: そのままのタイトルだけで一括
+  const pass1 = still.map(n => n);
+  for (const part of chunk(pass1, 50)){
+    let map;
+    try{
+      map = await fetchWikiCoordsBatch(part);
+    }catch{
+      map = new Map();
+    }
+    for (const orig of part){
+      if (result.has(orig)) continue;
+      // 返ってくるキーは “title” だが redirects で名前が変わってる可能性がある
+      // なので part 内の “orig” 文字列そのものが hit するケースを優先する
+      const direct = map.get(orig);
+      if (direct){
+        const k = normName(orig);
+        wikiCoordCache[k] = { lat: direct.lat, lng: direct.lng, elev: null };
+        result.set(orig, { ...direct, wikiTitle: orig });
+      }
+    }
+    saveWikiCoordCache();
+  }
+
+  // 2nd pass: 候補タイトルを増やして alias 解決（残りだけ）
+  const remain = still.filter(n => !result.has(n));
+  if (!remain.length) return result;
+
+  // orig -> candidates
+  const pairs = [];
+  const allTitles = [];
+  for (const orig of remain){
+    const cands = buildTitleCandidates(orig);
+    for (const t of cands){
+      pairs.push([orig, t]);
+      allTitles.push(t);
+    }
+  }
+
+  // 重複除去（タイトル側）
+  const uniqTitles = [...new Set(allTitles)];
+
+  // タイトル→coord をまとめて取る
+  const titleToCoord = new Map();
+  for (const part of chunk(uniqTitles, 50)){
+    let map;
+    try{
+      map = await fetchWikiCoordsBatch(part);
+    }catch{
+      map = new Map();
+    }
+    for (const [title, coord] of map.entries()){
+      titleToCoord.set(title, coord);
+    }
+  }
+
+  // orig に最初にヒットした候補を割り当て
+  for (const [orig, t] of pairs){
+    if (result.has(orig)) continue;
+    const coord = titleToCoord.get(t);
+    if (!coord) continue;
+    const k = normName(orig);
+    wikiCoordCache[k] = { lat: coord.lat, lng: coord.lng, elev: null };
+    result.set(orig, { ...coord, wikiTitle: t });
+  }
+  saveWikiCoordCache();
+
+  return result;
+}
+
+/* ===== resolveGeo（単発：保険） ===== */
+async function resolveGeoSingle(name){
   const key = normName(name);
   if (!key) return null;
 
@@ -889,13 +981,9 @@ async function resolveGeo(name){
     return { lat:Number(ov.lat), lng:Number(ov.lng), elev:(ov.elev!=null?Number(ov.elev):null), source:"override" };
   }
 
-  // ③ Wikipedia座標（最優先の自動）
-  for (const t of buildTitleCandidates(name)){
-    try{
-      const w = await fetchWikiCoord(t);
-      if (w) return w;
-    }catch{}
-  }
+  // ③ wiki cache
+  const wc = wikiCoordCache?.[key];
+  if (wc?.lat != null && wc?.lng != null) return { ...wc, source:"wiki_cache" };
 
   // ④ Open-Meteo（最後の保険）
   if (geoCache[key]) return { ...geoCache[key], source:"cache" };
@@ -911,7 +999,6 @@ async function resolveGeo(name){
       }
     }catch{}
   }
-
   return null;
 }
 
@@ -1041,19 +1128,35 @@ async function resolveForEnabledSets(){
     `（対象残り: ${pending.length}件）`
   ]);
 
+  // ★ まず “座標が無い” 山だけ集めて Wikipedia をバッチ解決
+  const needGeo = batch.filter(m => m.lat == null || m.lng == null).map(m => m.name);
+  let wikiResolved = new Map();
+  try{
+    wikiResolved = await resolveGeoManyByWiki(needGeo);
+  }catch{
+    wikiResolved = new Map();
+  }
+
   for (const m of batch){
     try{
       if (m.lat == null || m.lng == null){
-        const g = await resolveGeo(m.name);
-        if (!g){
-          ngGeo++;
-          if (ngNames.length < 10) ngNames.push(m.name);
-          addPendingGeoName(m.name);
-          continue;
+        const w = wikiResolved.get(m.name);
+        if (w){
+          m.lat = w.lat; m.lng = w.lng;
+          okGeo++;
+        }else{
+          // 保険で単発解決（override/manual/Open-Meteo）
+          const g = await resolveGeoSingle(m.name);
+          if (!g){
+            ngGeo++;
+            if (ngNames.length < 10) ngNames.push(m.name);
+            addPendingGeoName(m.name);
+            continue;
+          }
+          m.lat = g.lat; m.lng = g.lng;
+          if (m.elev == null && g.elev != null) m.elev = Math.round(g.elev);
+          okGeo++;
         }
-        m.lat = g.lat; m.lng = g.lng;
-        if (m.elev == null && g.elev != null) m.elev = Math.round(g.elev);
-        okGeo++;
       } else {
         okGeo++;
       }
