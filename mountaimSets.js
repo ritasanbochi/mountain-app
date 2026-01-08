@@ -238,9 +238,22 @@ export const SET_DEFS = {
 
 /** 座標の手動補正 */
 export const GEO_OVERRIDES = {
-  // 例:
-  // "燧ヶ岳": { lat: 36.955, lng: 139.285, elev: 2356 },
+  // --- geocoding が落ちやすい（同名/一般名詞/峠など） ---
+  "三頭山":     { lat: null, lng: null, elev: 1531, note: "東京/山梨/埼玉の三県境付近の三頭山" },
+  "高鈴山":     { lat: null, lng: null, elev: 623,  note: "茨城（日立）の高鈴山" },
+  "三筋山":     { lat: null, lng: null, elev: 821,  note: "伊豆の三筋山（静岡）" },
+  "川苔山":     { lat: null, lng: null, elev: 1363, note: "奥多摩の川苔山（川乗山表記も）" },
+  "黒檜山":     { lat: null, lng: null, elev: 1828, note: "赤城山の黒檜山（群馬）" },
+  "大岳山":     { lat: null, lng: null, elev: 1266, note: "奥多摩の大岳山（東京）" },
+  "高水山":     { lat: null, lng: null, elev: 759,  note: "奥多摩の高水山（東京）" },
+  "鶏頂山":     { lat: null, lng: null, elev: 1765, note: "栃木（日光）方面の鶏頂山" },
+  "大菩薩峠":   { lat: null, lng: null, elev: null, note: "峠は山頂ではない。大菩薩嶺に寄せるなら山名変換推奨" },
+  "生藤山":     { lat: null, lng: null, elev: 990,  note: "奥多摩〜上野原（東京/山梨境界）の生藤山" },
+
+  // --- 表記ゆれ（山名変換したい場合の例） ---
+  // "川苔山": { lat:..., lng:..., elev:..., alias: "川乗山" },
 };
+
 
 export async function loadSetNames(setKey){
   const def = SET_DEFS?.[setKey];
