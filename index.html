@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>登山向け山岳マップ</title>
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<!-- ★ CDNを安定系に変更（unpkgjs.com問題回避） -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous">
 <link rel="icon" href="data:,">
 
 <style>
@@ -176,7 +177,8 @@
   </div>
 </div>
 
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<!-- ★ CDNを安定系に変更 -->
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
 
 <script type="module">
 import mountains from "./mountains.js";
@@ -196,7 +198,6 @@ const buildBtn = document.getElementById("buildExtra");
 const resetBtn = document.getElementById("resetBuild");
 
 const BUILD_STATE_KEY = "mountains_extra_build_v1";
-
 function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
 function escapeHtml(s){
@@ -438,6 +439,14 @@ function mergeMembership(map, name, setKey){
   else map.get(k)._sets.add(setKey);
 }
 
+// “山じゃない”混入を固定化対象から落とす（ここで最終防波堤）
+function looksNonMountainSpot(name){
+  const s = String(name ?? "");
+  const hasMountainWord = /山|岳|峰/u.test(s);
+  if (hasMountainWord) return false;
+  return /(沼|湿原|高原|ヶ原|原|峠|岬|浜|滝|湖|新聞社|会社|駅)$/u.test(s);
+}
+
 async function buildExtra(){
   const targets = chosenExtraSetKeys();
   if (!targets.length){
@@ -462,6 +471,7 @@ async function buildExtra(){
       for (const n of names){
         const nn = normName(n);
         if (!nn || hyaku.has(nn)) continue;
+        if (looksNonMountainSpot(n)) continue; // ★混入カット
         mergeMembership(map, n, k);
       }
     }
@@ -569,9 +579,12 @@ L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png",
 
 const markerLayer = L.layerGroup().addTo(mapObj);
 
+// ★ 影画像も同じCDNで固定（unpkgjs.comに飛ばない）
+const LEAFLET_SHADOW = "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/images/marker-shadow.png";
+
 const icon = color => L.icon({
   iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-${color}.png`,
-  shadowUrl: "https://unpkg.com/leaflet/dist/images/marker-shadow.png",
+  shadowUrl: LEAFLET_SHADOW,
   iconSize: [25,41],
   iconAnchor: [12,41]
 });
@@ -605,7 +618,7 @@ function buildScoreGridHtml(m, selDay, selTime){
     </thead>
   `;
   const bodyRows = [];
-  for (let d=0; d<=3; d++){
+  for (let d = 0; d <= 3; d++){
     const dk = getDateKey(d);
     const tds = timeSlots.map(t => {
       const s = m.weather?.[dk]?.[t] ?? "-";
@@ -823,12 +836,13 @@ function initMobileListGestures(){
   window.addEventListener("resize", () => setListCollapsed(isMobile() ? listCollapsed : false));
 }
 function drawList(items, day){
-  const target = isMobile() ? listBodyEl : listEl;
   if (isMobile()){
-    target.innerHTML = `<div style="padding:8px 10px; font-weight:700;">${escapeHtml(dayLabel(day))} の山</div>`;
+    listBodyEl.innerHTML = `<div style="padding:8px 10px; font-weight:700;">${escapeHtml(dayLabel(day))} の山</div>`;
   } else {
-    target.innerHTML = `<b>${escapeHtml(dayLabel(day))} の山</b><br>`;
+    listEl.innerHTML = `<b>${escapeHtml(dayLabel(day))} の山</b><br>`;
   }
+
+  const target = isMobile() ? listBodyEl : listEl;
 
   items.forEach(({ m, best, marker }) => {
     const setPills = m._sets?.size
@@ -911,9 +925,12 @@ async function init(){
 
   for (const m of geoOK) addMarkerForMountain(m);
 
+  // weather.js 側に6時間キャッシュがある前提で、同時2本に制限
   const tasks = geoOK.map(m => async () => {
     if (m.weather && Object.keys(m.weather).length) return;
     m.weather = await generateWeatherScore(m.name, m.lat, m.lng, m.level, m.elev);
+    // ちょい間を空けて優しく（体感はほぼ変わらず、429の発生率を下げる）
+    await sleep(40);
   });
 
   let last = 0;
