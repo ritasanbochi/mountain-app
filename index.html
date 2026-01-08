@@ -321,7 +321,7 @@
 
 <script type="module">
 import mountains from "./mountains.js";
-import { MOUNTAIN_SETS } from "./mountaimSets.js";
+import { loadSetNames, SET_DEFS, GEO_OVERRIDES } from "./mountaimSets.js";
 import { generateWeatherScore } from "./weather.js";
 
 /* ===== 時間帯 ===== */
@@ -430,7 +430,7 @@ function fmtJpDateTime(iso){
   if (!iso) return "-";
   const d = new Date(iso);
   if (!Number.isFinite(d.getTime())) return "-";
-  return `${d.getFullYear()}/${pad2(d.getMonth()+1)}/${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  return `${d.getFullYear()}/${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 function timeAgo(iso){
   if (!iso) return "-";
@@ -448,8 +448,6 @@ function timeAgo(iso){
 function getDetail(m, dateKey, time){
   return m.weather?._details?.[dateKey]?.[time] ?? null;
 }
-
-/* ===== ベスト時間 ===== */
 function getBestTime(weather, dateKey){
   const w = weather?.[dateKey];
   if (!w) return null;
@@ -461,8 +459,6 @@ function getBestTime(weather, dateKey){
   }
   return best;
 }
-
-/* ===== スコア早見表 ===== */
 function scoreCellClass(score){
   if (score === "A") return "a";
   if (score === "B") return "b";
@@ -499,13 +495,14 @@ function buildScoreGridHtml(m, selDay, selTime){
   `;
 }
 
+/* ===== セット表示 ===== */
 function setLabel(k){
   return ({
     HYAKU:"百名山",
     HANA_100:"花100",
     NIHON_200:"二百名山",
     NIHON_300:"三百名山"
-  }[k] ?? k);
+  }[k] ?? (SET_DEFS?.[k]?.label ?? k));
 }
 function normName(s){
   return String(s ?? "")
@@ -514,7 +511,7 @@ function normName(s){
     .replace(/[（(].*?[）)]/g,"");
 }
 
-/* ===== master: 100座 + 追加セット ===== */
+/* ===== master ===== */
 const byName = new Map();
 function upsertMountain(base){
   const key = normName(base.name);
@@ -532,34 +529,19 @@ function upsertMountain(base){
   }
   return byName.get(key);
 }
+mountains.forEach(m => upsertMountain({ ...m, _sets:["HYAKU"] }));
 
-mountains.forEach(m => upsertMountain({ ...m, _sets: ["HYAKU"] }));
+/* ===== セットロード管理（山名だけ） ===== */
+const loadedSetKeys = new Set();
 
-/* 追加セット名を投入（座標は後で埋める） */
-for (const [setKey, names] of Object.entries(MOUNTAIN_SETS || {})){
-  for (const name of (names || [])){
-    upsertMountain({
-      name,
-      lat:null, lng:null, elev:null,
-      level:"中級",
-      gpx:null,
-      weather:{},
-      _sets:[setKey]
-    });
-  }
-}
+/* ===== Geocoding（Open-Meteo） + overrides ===== */
+const GEO_CACHE_KEY = "mount_geo_openmeteo_v2";
+const geoCache = (() => { try { return JSON.parse(localStorage.getItem(GEO_CACHE_KEY)||"{}")||{}; } catch { return {}; } })();
+function saveGeoCache(){ try { localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(geoCache)); } catch {} }
 
-/* ===== Open-Meteo Geocoding（ここで座標を取る） ===== */
-const GEO_CACHE_KEY = "mount_geo_openmeteo_v1";
-function loadGeoCache(){ try{ return JSON.parse(localStorage.getItem(GEO_CACHE_KEY)||"{}")||{}; }catch{ return {}; } }
-function saveGeoCache(obj){ try{ localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(obj)); }catch{} }
-const geoCache = loadGeoCache();
-
-/* 日本ざっくりbbox */
 function isJapanLike(lat,lng){
   return lat >= 24 && lat <= 46.5 && lng >= 122 && lng <= 146.5;
 }
-
 async function openMeteoGeocode(query){
   const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=10&language=ja&format=json`;
   const res = await fetch(url);
@@ -568,36 +550,32 @@ async function openMeteoGeocode(query){
   const r = j?.results;
   if (!Array.isArray(r) || r.length === 0) return null;
 
-  // 日本っぽいのを優先
   const jp = r.find(x => isJapanLike(Number(x.latitude), Number(x.longitude))) || r[0];
   const lat = Number(jp.latitude), lng = Number(jp.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   const elev = (jp.elevation != null && Number.isFinite(Number(jp.elevation))) ? Number(jp.elevation) : null;
   return { lat, lng, elev };
 }
-
 async function resolveGeo(name){
   const key = normName(name);
   if (!key) return null;
+
+  const ov = GEO_OVERRIDES?.[name] || GEO_OVERRIDES?.[key];
+  if (ov?.lat && ov?.lng){
+    return { lat:Number(ov.lat), lng:Number(ov.lng), elev:(ov.elev!=null?Number(ov.elev):null), source:"override" };
+  }
   if (geoCache[key]) return { ...geoCache[key], source:"cache" };
 
-  const tries = [
-    name,
-    `${name} 日本`,
-    `${name} 山 日本`,
-  ];
-
+  const tries = [name, `${name} 日本`, `${name} 山 日本`];
   for (const q of tries){
     try{
       const g = await openMeteoGeocode(q);
       if (g){
         geoCache[key] = { lat:g.lat, lng:g.lng, elev:g.elev };
-        saveGeoCache(geoCache);
+        saveGeoCache();
         return { ...geoCache[key], source:"geocode" };
       }
-    }catch{
-      // 次のtryへ
-    }
+    }catch{}
   }
   return null;
 }
@@ -605,7 +583,6 @@ async function resolveGeo(name){
 /* ===== マーカー（再生成NG：未作成だけ追加） ===== */
 const markerEntries = [];
 const markerByKey = new Map();
-
 function addMarkerForMountain(m){
   const key = normName(m.name);
   if (!key || markerByKey.has(key)) return;
@@ -621,7 +598,7 @@ function addMarkerForMountain(m){
   markerByKey.set(key, marker);
 }
 
-/* ===== フィルタ状態 ===== */
+/* ===== フィルタ ===== */
 function getState(){
   const day = Number(daySelect.value);
   const time = getSelectedTime();
@@ -637,7 +614,6 @@ function getState(){
   )].map(e => e.value);
 
   const sets = [...document.querySelectorAll('.setChk:checked')].map(e => e.value);
-
   return { day, time, dateKey, goodOnly, scores, levels, sets };
 }
 function mountainInSelectedSets(m, sets){
@@ -647,10 +623,43 @@ function mountainInSelectedSets(m, sets){
   return sets.some(s => ms.has(s));
 }
 
+/* ===== 追加セット（山名）を byName に投入 ===== */
+async function ensureSetLoaded(setKey){
+  if (setKey === "HYAKU") return;
+  if (loadedSetKeys.has(setKey)) return;
+  if (!SET_DEFS?.[setKey]) return;
+
+  setStatus.textContent = `${setLabel(setKey)}: 山名取得中...`;
+  const { names, meta } = await loadSetNames(setKey);
+
+  for (const name of names){
+    const key = normName(name);
+    if (!key) continue;
+
+    if (byName.has(key)){
+      byName.get(key)._sets.add(setKey);
+      continue;
+    }
+    byName.set(key, {
+      name,
+      lat:null, lng:null, elev:null,
+      level:"中級",
+      gpx:null,
+      weather:{},
+      _sets: new Set([setKey]),
+      _setMeta: meta
+    });
+  }
+
+  loadedSetKeys.add(setKey);
+  setStatus.textContent = `${setLabel(setKey)}: ${names.length}件（${meta?.cached ? "cache" : "fresh"}）`;
+}
+
 /* ===== 追加処理（座標→天気→マーカー） ===== */
 let resolving = false;
 async function resolveForEnabledSets(){
   if (resolving) return;
+
   const { sets } = getState();
   if (!sets.length) return;
 
@@ -663,19 +672,15 @@ async function resolveForEnabledSets(){
   if (!pending.length) return;
 
   resolving = true;
-  let okGeo = 0, ngGeo = 0, okWx = 0, ngWx = 0;
+  let okGeo=0, ngGeo=0, okWx=0, ngWx=0;
 
-  // 安全運用：最大40件ずつ
+  // 安全のため 40件ずつ
   for (const m of pending.slice(0, 40)){
     try{
       if (m.lat == null || m.lng == null){
         const g = await resolveGeo(m.name);
-        if (!g){
-          ngGeo++;
-          continue;
-        }
-        m.lat = g.lat;
-        m.lng = g.lng;
+        if (!g){ ngGeo++; continue; }
+        m.lat = g.lat; m.lng = g.lng;
         if (m.elev == null && g.elev != null) m.elev = Math.round(g.elev);
         okGeo++;
       } else {
@@ -737,9 +742,10 @@ function detailHtml(m, selectedTime){
     <div class="popup">
       <b>${escapeHtml(m.name)}</b>${setPills}<br>
       標高：${m.elev ?? "-"} m / 難易度：${escapeHtml(m.level)}<br>
-      <small>座標: ${m.lat?.toFixed?.(3) ?? "-"}, ${m.lng?.toFixed?.(3) ?? "-"}</small>
 
-      <hr>${grid}
+      <hr>
+      ${grid}
+
       <hr>
       <b>${escapeHtml(dayLabel(day))} の根拠（時間帯別）</b><br>
       <table class="wx-table">
@@ -750,6 +756,7 @@ function detailHtml(m, selectedTime){
         </thead>
         <tbody>${rows}</tbody>
       </table>
+      <small>※ 風/突風/気温は「中腹→山頂」</small>
     </div>
   `;
 }
@@ -777,15 +784,13 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && detailOverlay.classList.contains("show")) closeDetail();
 });
 
-/* ===== スマホの山リスト ===== */
+/* ===== リスト ===== */
 const listEl = document.getElementById("list");
 const listHeaderEl = document.getElementById("listHeader");
 const listBodyEl = document.getElementById("listBody");
 const listTabEl = document.getElementById("listTab");
 
-function isMobile(){
-  return window.matchMedia && window.matchMedia("(max-width:768px)").matches;
-}
+function isMobile(){ return window.matchMedia && window.matchMedia("(max-width:768px)").matches; }
 let listCollapsed = false;
 function setListCollapsed(v){
   listCollapsed = v;
@@ -830,8 +835,6 @@ function initMobileListGestures(){
     setListCollapsed(isMobile() ? listCollapsed : false);
   });
 }
-
-/* ===== リスト描画 ===== */
 function drawList(items, day){
   const target = isMobile() ? listBodyEl : listEl;
 
@@ -872,7 +875,7 @@ function drawList(items, day){
   });
 }
 
-/* ===== 更新 ===== */
+/* ===== update ===== */
 function updateView(){
   const { day, time, dateKey, goodOnly, scores, levels, sets } = getState();
   const items = [];
@@ -895,10 +898,9 @@ function updateView(){
         entry.shown = true;
       }
       marker.setIcon(icons[score]);
-
       const best = getBestTime(m.weather, dateKey);
       items.push({ m, best, marker });
-    } else {
+    }else{
       if (entry.shown){
         markerLayer.removeLayer(marker);
         entry.shown = false;
@@ -917,14 +919,13 @@ function updateView(){
   setTimeout(() => map.invalidateSize(), 60);
 }
 
-/* ===== 初期化 ===== */
+/* ===== init ===== */
 async function init(){
   initDaySelectLabels();
   if (Number(daySelect.value) === 0) setSliderIndex(nearestTimeSlotIndexNow());
 
-  // 百名山：まず天気生成してマーカー追加
+  // 百名山は先に天気生成
   const baseList = [...byName.values()].filter(m => m._sets?.has("HYAKU") && m.lat != null && m.lng != null);
-
   await Promise.all(baseList.map(async m => {
     if (!m.weather || Object.keys(m.weather).length === 0){
       m.weather = await generateWeatherScore(m.name, m.lat, m.lng, m.level, m.elev);
@@ -936,6 +937,8 @@ async function init(){
   document.querySelectorAll("#control input,#control select").forEach(e => {
     if (e === daySelect) return;
     e.addEventListener("change", async () => {
+      const { sets } = getState();
+      for (const s of sets) await ensureSetLoaded(s);
       await resolveForEnabledSets();
       updateView();
     });
@@ -946,7 +949,6 @@ async function init(){
 
   updateView();
 }
-
 init();
 </script>
 </body>
