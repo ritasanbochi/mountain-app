@@ -37,7 +37,6 @@
   .list-item{ border-bottom:1px solid #ddd; padding:8px; cursor:pointer; }
   .list-item:hover{ background:#eef6ff; }
   .star{ color:gold; font-weight:bold; }
-  .badge{ display:inline-block; padding:1px 6px; border-radius:10px; font-size:11px; margin-left:6px; vertical-align:1px; }
   .setpill{ display:inline-block; padding:1px 6px; border-radius:999px; font-size:11px; border:1px solid #ddd; background:#fafafa; margin-left:6px; }
 
   #detailOverlay{ position:fixed; inset:0; background:rgba(0,0,0,0.35); z-index:9999; display:none; }
@@ -147,14 +146,6 @@
   </div>
 
   <div class="group">
-    <b>生成オプション</b>
-    <label><input type="checkbox" id="optExcludeNonPeak" checked>沼/峠/高原など除外</label>
-    <label><input type="checkbox" id="optStrictJapan" checked>日本bbox外を除外</label>
-    <label><input type="checkbox" id="optUseGeocode" checked>Open-Meteo保険ON</label>
-    <label><input type="checkbox" id="optUseSearch" checked>Wiki検索フォールバックON</label>
-  </div>
-
-  <div class="group">
     <span id="setStatus" style="font-size:12px;color:#444; max-width: 78vw;"></span>
   </div>
 </div>
@@ -191,26 +182,68 @@
 <script type="module">
 import mountains from "./mountains.js";
 import mountainsExtra from "./mountains_extra.js";
-import { generateWeatherScore, geocodeMountain } from "./weather.js";
-import { loadSetNames, GEO_OVERRIDES } from "./mountaimSets.js";
+import { generateWeatherScore } from "./weather.js";
 
-/* ========= UI/util ========= */
+/* ====== 429対策：同時実行制限 + リトライ ====== */
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+async function withRetry(fn, {
+  maxRetries = 5,
+  baseDelayMs = 800,
+  maxDelayMs = 12000
+} = {}){
+  let attempt = 0;
+  while (true){
+    try{
+      return await fn();
+    }catch (e){
+      attempt++;
+      const msg = String(e?.message || "");
+      // fetchOpenMeteo 側で throw してない場合でも 429 は generateWeatherScore 内で例外になることがあるため、
+      // ここでは "429" 文字列を拾うのも保険にする
+      const is429 = msg.includes("429") || msg.includes("Too Many Requests");
+      if (!is429 || attempt > maxRetries) throw e;
+
+      const delay = Math.min(maxDelayMs, baseDelayMs * Math.pow(2, attempt - 1));
+      await sleep(delay);
+    }
+  }
+}
+
+async function runWithConcurrency(tasks, concurrency, onProgress){
+  let idx = 0;
+  let active = 0;
+  let done = 0;
+  return new Promise((resolve) => {
+    const results = new Array(tasks.length);
+    const next = () => {
+      while (active < concurrency && idx < tasks.length){
+        const current = idx++;
+        active++;
+        tasks[current]().then((r) => {
+          results[current] = r;
+        }).catch((e) => {
+          results[current] = { error: e };
+        }).finally(() => {
+          active--;
+          done++;
+          onProgress?.(done, tasks.length);
+          if (done === tasks.length) resolve(results);
+          else next();
+        });
+      }
+    };
+    next();
+  });
+}
+
+/* ====== UI/util ====== */
 const timeSlots  = ["06:00","08:00","10:00","12:00","14:00","16:00"];
 const timeLabels = ["06–08","08–10","10–12","12–14","14–16","16–18"];
 const slider = document.getElementById("timeSlider");
 const timeLabel = document.getElementById("timeLabel");
 const daySelect = document.getElementById("day");
 const setStatus = document.getElementById("setStatus");
-const exportHint = document.getElementById("exportHint");
-const buildBtn = document.getElementById("buildExtra");
-const resetBtn = document.getElementById("resetBuild");
-
-const optExcludeNonPeak = document.getElementById("optExcludeNonPeak");
-const optStrictJapan = document.getElementById("optStrictJapan");
-const optUseGeocode = document.getElementById("optUseGeocode");
-const optUseSearch = document.getElementById("optUseSearch");
-
-const BUILD_STATE_KEY = "mount_extra_build_state_v3_wiki_search_filter";
 
 function escapeHtml(s){
   return String(s ?? "").replace(/[&<>"']/g, c => ({
@@ -218,7 +251,7 @@ function escapeHtml(s){
   }[c]));
 }
 function setStatusHtml(lines){
-  const safe = (lines || []).filter(Boolean).slice(0, 18).map(s => escapeHtml(s));
+  const safe = (lines || []).filter(Boolean).slice(0, 16).map(s => escapeHtml(s));
   setStatus.innerHTML = safe.join("<br>");
 }
 function pad2(n){ return String(n).padStart(2, "0"); }
@@ -239,7 +272,6 @@ function dayLabel(offset){
   return `${mm}/${dd}(${wd}) ${rel}`;
 }
 function initDaySelectLabels(){ [...daySelect.options].forEach(opt => opt.textContent = dayLabel(Number(opt.value))); }
-
 function nearestTimeSlotIndexNow(){
   const now = new Date();
   const nowMin = now.getHours() * 60 + now.getMinutes();
@@ -263,7 +295,9 @@ daySelect.addEventListener("change", () => {
   updateView();
 });
 const getSelectedTime = () => timeSlots[Number(slider.value)];
-
+function normName(s){
+  return String(s ?? "").trim().replace(/\s+/g,"").replace(/[（(].*?[）)]/g,"");
+}
 function setLabel(k){
   return ({
     HYAKU:"百名山",
@@ -272,547 +306,13 @@ function setLabel(k){
     NIHON_300:"三百名山"
   }[k] ?? k);
 }
-function normName(s){
-  return String(s ?? "").trim().replace(/\s+/g,"").replace(/[（(].*?[）)]/g,"");
-}
 
-/* ========= 日本bbox & NG分類 ========= */
-function isInJapanBbox(lat, lng){
-  return (lat >= 24.0 && lat <= 46.5 && lng >= 123.0 && lng <= 146.5);
-}
-function isValidCoord(lat, lng){
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
-  if (lat === 0 && lng === 0) return false;
-  if (optStrictJapan.checked && !isInJapanBbox(lat, lng)) return false;
-  return true;
-}
-function looksNonPeak(name){
-  return /(沼|峠|高原|湿原|湖|池|原|ヶ原|平|谷|渓谷)$/u.test(String(name ?? ""));
-}
-function looksBadName(name){
-  // 「毎日新聞社」みたいな混入を弾く
-  return /(新聞|新聞社|会社|株式会社|協会|連盟|財団|法人|大学|研究所|病院|鉄道|駅|市|町|村)$/u.test(String(name ?? ""));
-}
-
-/* ========= Wikipedia API (coords + search) ========= */
-async function wikiCoords(title){
-  const url = "https://ja.wikipedia.org/w/api.php"
-    + "?action=query&format=json&origin=*"
-    + "&prop=coordinates&colimit=1&coprop=type"
-    + "&redirects=1&titles=" + encodeURIComponent(title);
-
-  const res = await fetch(url);
-  if (!res.ok) return null;
-  const data = await res.json();
-  const pages = data?.query?.pages;
-  if (!pages) return null;
-  const first = Object.values(pages)[0];
-  const c = first?.coordinates?.[0];
-  if (!c) return null;
-  const lat = Number(c.lat);
-  const lng = Number(c.lon);
-  if (!isValidCoord(lat, lng)) return null;
-  return { lat, lng, source: "wiki" };
-}
-async function wikiSearchTitles(q){
-  const url = "https://ja.wikipedia.org/w/api.php"
-    + "?action=query&format=json&origin=*"
-    + "&list=search&srlimit=8&srsearch=" + encodeURIComponent(q);
-  const res = await fetch(url);
-  if (!res.ok) return [];
-  const data = await res.json();
-  return (data?.query?.search || []).map(x => x.title).filter(Boolean);
-}
-function looksMountainTitle(t){
-  // 末尾が山/岳/峰、または文字列中に山/岳/峰
-  return /[山岳峰]$/.test(t) || /山|岳|峰/.test(t);
-}
-
-/* ========= 山名ゆらぎ ========= */
-function buildNameVariants(name){
-  const base = String(name ?? "").trim();
-  const clean = base.replace(/[（(].*?[）)]/g, "").trim();
-  const variants = new Set([base, clean]);
-
-  if (!/[山岳峰]$/.test(clean)){
-    variants.add(clean + "山");
-    variants.add(clean + "岳");
-    variants.add(clean + "峰");
-  }
-
-  variants.add(clean.replace(/ヶ/g,"ケ"));
-  variants.add(clean.replace(/ヶ/g,"ガ"));
-  variants.add(clean.replace(/ケ/g,"ヶ"));
-  variants.add(clean.replace(/ガ/g,"ヶ"));
-
-  return [...variants].filter(Boolean);
-}
-
-/* ========= 取得ロジック（Wiki→Search→Geocode） ========= */
-function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
-
-async function resolveCoordsSmart(name){
-  if (!name) return { ok:false, reason:"empty" };
-
-  // 混入弾き
-  if (looksBadName(name)) return { ok:false, reason:"bad_name" };
-
-  // 非山スポットを弾く（誤爆防止）
-  if (optExcludeNonPeak.checked && looksNonPeak(name)){
-    // ただし Wiki 直指定で取れるなら採用しても良い、という場合は下2行を外す
-    // 今回は「誤爆防止優先」で NG に寄せる
-    return { ok:false, reason:"non_peak" };
-  }
-
-  const variants = buildNameVariants(name);
-
-  // 1) Wiki direct
-  for (const v of variants){
-    const w = await wikiCoords(v);
-    if (w) return { ok:true, lat:w.lat, lng:w.lng, elev:null, source:w.source };
-    await sleep(60);
-  }
-
-  // 2) Wiki search fallback
-  if (optUseSearch.checked){
-    const queries = [name, `${name} 山`, `${name} 岳`, `${name} 峰`];
-    for (const q of queries){
-      const titles = await wikiSearchTitles(q);
-      const ordered = [
-        ...titles.filter(looksMountainTitle),
-        ...titles.filter(t => !looksMountainTitle(t)),
-      ];
-      for (const t of ordered){
-        const w = await wikiCoords(t);
-        if (w) return { ok:true, lat:w.lat, lng:w.lng, elev:null, source:"wiki_search" };
-        await sleep(60);
-      }
-    }
-  }
-
-  // 3) Open-Meteo geocode fallback
-  if (optUseGeocode.checked){
-    for (const v of variants){
-      try{
-        const g = await geocodeMountain(v);
-        if (!g) continue;
-        const lat = Number(g.lat);
-        const lng = Number(g.lng);
-        if (!isValidCoord(lat, lng)) continue;
-        return { ok:true, lat, lng, elev:(g.elev==null? null : Number(g.elev)), source:"geocode" };
-      }catch{
-        // next
-      }
-      await sleep(120);
-    }
-  }
-
-  return { ok:false, reason:"not_found" };
-}
-
-/* ========= build state ========= */
-function loadBuildState(){
-  try{
-    const raw = localStorage.getItem(BUILD_STATE_KEY);
-    if (!raw) return null;
-    const obj = JSON.parse(raw);
-    obj.done = obj.done || {};
-    obj.ng = obj.ng || {}; // key -> {reason}
-    return obj;
-  }catch{
-    return null;
-  }
-}
-function saveBuildState(st){
-  try{ localStorage.setItem(BUILD_STATE_KEY, JSON.stringify(st)); }catch{}
-}
-function downloadText(filename, text){
-  const blob = new Blob([text], { type:"text/javascript;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-async function copyOrDownload(filename, content, okMsg){
-  try{
-    await navigator.clipboard.writeText(content);
-    exportHint.className = "chip ok";
-    exportHint.style.display = "inline-block";
-    exportHint.textContent = okMsg + "（クリップボード）";
-    setTimeout(() => { exportHint.style.display="none"; }, 7000);
-  }catch{
-    exportHint.className = "chip danger";
-    exportHint.style.display = "inline-block";
-    exportHint.textContent = okMsg + "（コピー不可→ダウンロード）";
-    downloadText(filename, content);
-    setTimeout(() => { exportHint.style.display="none"; }, 8000);
-  }
-}
-
-function buildSetTargets(){
-  const selected = [...document.querySelectorAll(".setChk:checked")].map(e => e.value);
-  const targets = selected.filter(k => k !== "HYAKU");
-  return targets.length ? targets : ["HANA_100","NIHON_200","NIHON_300"];
-}
-function mergeSetMembership(map, name, setKey){
-  const key = normName(name);
-  if (!key) return;
-  if (!map.has(key)){
-    map.set(key, { name, _sets: new Set([setKey]) });
-  }else{
-    map.get(key)._sets.add(setKey);
-  }
-}
-
-function summarizeNg(st){
-  const cats = {
-    non_peak: [],
-    bad_name: [],
-    not_found: [],
-    invalid_coord: [],
-    empty: [],
-    other: []
-  };
-  for (const [k,v] of Object.entries(st.ng || {})){
-    const r = v?.reason || "other";
-    if (cats[r]) cats[r].push(k);
-    else cats.other.push(k);
-  }
-  const line = (label, arr) => `${label}: ${arr.length}${arr.length ? `（例: ${arr.slice(0,8).join(" / ")}${arr.length>8?" ...":""}）` : ""}`;
-  return [
-    line("NG(非山スポット)", cats.non_peak),
-    line("NG(混入っぽい)", cats.bad_name),
-    line("NG(見つからず)", cats.not_found),
-    line("NG(座標不正)", cats.invalid_coord),
-    (cats.other.length ? line("NG(その他)", cats.other) : "")
-  ].filter(Boolean);
-}
-
-async function buildExtraOnce(){
-  const targets = buildSetTargets();
-  const metaLines = [];
-
-  // 既存extra（有効座標のみ流用）
-  const existing = new Map();
-  (mountainsExtra || []).forEach(m => {
-    const k = normName(m.name);
-    if (!k) return;
-    const lat = Number(m.lat), lng = Number(m.lng);
-    if (isValidCoord(lat, lng)) existing.set(k, m);
-  });
-
-  // 百名山は除外（誤爆・重複防止）
-  const hyakuSet = new Set(mountains.map(m => normName(m.name)));
-
-  // 1) 山名取得（セット別）
-  const nameToSets = new Map(); // norm -> {name,_sets}
-  for (const setKey of targets){
-    metaLines.push(`山名取得中: ${setLabel(setKey)} ...`);
-    setStatusHtml(metaLines);
-
-    const { names, meta } = await loadSetNames(setKey);
-    metaLines.push(`  ${setLabel(setKey)}: ${names.length}件（${meta.cached ? "cache" : "fresh"}）`);
-    setStatusHtml(metaLines);
-
-    for (const n of names){
-      const nn = normName(n);
-      if (!nn) continue;
-      if (hyakuSet.has(nn)) continue; // 百名山と被りは除外
-      mergeSetMembership(nameToSets, n, setKey);
-    }
-  }
-
-  const namesAll = [...nameToSets.values()];
-  const total = namesAll.length;
-
-  // 2) 進捗
-  let st = loadBuildState();
-  const optSig = JSON.stringify({
-    targets,
-    excludeNonPeak: optExcludeNonPeak.checked,
-    strictJapan: optStrictJapan.checked,
-    useGeocode: optUseGeocode.checked,
-    useSearch: optUseSearch.checked
-  });
-
-  if (!st || st.optSig !== optSig){
-    st = { createdAt:new Date().toISOString(), optSig, targets, total, done:{}, ng:{} };
-    saveBuildState(st);
-  }else{
-    st.total = total;
-    saveBuildState(st);
-  }
-
-  const start = Date.now();
-
-  // 3) 取得ループ
-  for (let i = 0; i < namesAll.length; i++){
-    const item = namesAll[i];
-    const key = normName(item.name);
-    if (!key) continue;
-    if (st.done[key] || st.ng[key]) continue;
-
-    // 既存extra優先
-    const ex = existing.get(key);
-    if (ex){
-      st.done[key] = {
-        name: ex.name,
-        lat: Number(ex.lat),
-        lng: Number(ex.lng),
-        elev: (ex.elev==null? null : Number(ex.elev)),
-        _sets: Array.isArray(ex._sets) ? ex._sets : [...item._sets],
-        source: "existing"
-      };
-      saveBuildState(st);
-      continue;
-    }
-
-    // overrides（ただし座標チェック）
-    const ov = GEO_OVERRIDES?.[item.name];
-    if (ov){
-      const lat = Number(ov.lat), lng = Number(ov.lng);
-      if (isValidCoord(lat, lng)){
-        st.done[key] = {
-          name: item.name, lat, lng,
-          elev: (ov.elev==null? null : Number(ov.elev)),
-          _sets: [...item._sets],
-          source: "override"
-        };
-        saveBuildState(st);
-        continue;
-      }else{
-        st.ng[key] = { reason:"invalid_coord" };
-        saveBuildState(st);
-        continue;
-      }
-    }
-
-    metaLines.push(`座標取得 ${i+1}/${total}: ${item.name}`);
-    setStatusHtml(metaLines.slice(-10));
-
-    const r = await resolveCoordsSmart(item.name);
-    if (!r.ok){
-      st.ng[key] = { reason: r.reason || "other" };
-      saveBuildState(st);
-      continue;
-    }
-
-    // 最終チェック
-    if (!isValidCoord(Number(r.lat), Number(r.lng))){
-      st.ng[key] = { reason:"invalid_coord" };
-      saveBuildState(st);
-      continue;
-    }
-
-    st.done[key] = {
-      name: item.name,
-      lat: Number(r.lat),
-      lng: Number(r.lng),
-      elev: (r.elev==null? null : Number(r.elev)),
-      _sets: [...item._sets],
-      source: r.source
-    };
-    saveBuildState(st);
-
-    await sleep(120);
-  }
-
-  // 4) 出力（doneのみ、日本bbox外/0,0は弾いた状態）
-  const out = Object.values(st.done).map(r => ({
-    name: r.name,
-    lat: r.lat,
-    lng: r.lng,
-    elev: r.elev ?? null,
-    level: "中級",
-    gpx: null,
-    weather: {},
-    _sets: r._sets
-  })).filter(x => isValidCoord(Number(x.lat), Number(x.lng)))
-    .sort((a,b)=> String(a.name).localeCompare(String(b.name),"ja"));
-
-  const elapsed = Math.round((Date.now() - start)/1000);
-  const ngCount = Object.keys(st.ng).length;
-
-  setStatusHtml([
-    `自動取得完了（対象セット: ${targets.map(setLabel).join(" / ")}）`,
-    `OK: ${out.length} / NG: ${ngCount} / 合計ユニーク: ${total}`,
-    `所要: ${elapsed}s`,
-    ...summarizeNg(st)
-  ]);
-
-  const content =
-`// mountains_extra.js
-// generated at: ${new Date().toISOString()}
-// source priority: Wikipedia coordinates -> Wikipedia search -> Open-Meteo geocoding
-// filters: ${[
-  optExcludeNonPeak.checked ? "excludeNonPeak" : "includeNonPeak",
-  optStrictJapan.checked ? "strictJapanBBox" : "noJapanBBox",
-  optUseSearch.checked ? "wikiSearchOn" : "wikiSearchOff",
-  optUseGeocode.checked ? "geocodeOn" : "geocodeOff"
-].join(", ")}
-
-const mountainsExtra = ${JSON.stringify(out, null, 2)};
-
-export default mountainsExtra;
-`;
-
-  await copyOrDownload("mountains_extra.js", content, `生成完了: ${out.length}件（コピー or DL）`);
-}
-
-/* ========= map / app ========= */
-const map = L.map("map").setView([36.5, 138], 5);
-L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/hillshademap/{z}/{x}/{y}.png",
-  { opacity: 0.5, attribution:"地理院 陰影" }
-).addTo(map);
-L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png",
-  { opacity: 0.85, attribution:"地理院 地図" }
-).addTo(map);
-
-const markerLayer = L.layerGroup().addTo(map);
-
-const icon = color => L.icon({
-  iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-${color}.png`,
-  shadowUrl: "https://unpkg.com/leaflet/dist/images/marker-shadow.png",
-  iconSize: [25,41],
-  iconAnchor: [12,41]
-});
-const icons = { A:icon("green"), B:icon("yellow"), C:icon("red") };
-const scorePriority = { A:3, B:2, C:1 };
-
-function getBestTime(weather, dateKey){
-  const w = weather?.[dateKey];
-  if (!w) return null;
-  let best = null;
-  for (const t of timeSlots){
-    const s = w[t];
-    if (!s) continue;
-    if (!best || scorePriority[s] > scorePriority[best.score]) best = { time:t, score:s };
-  }
-  return best;
-}
-function scoreCellClass(score){
-  if (score === "A") return "a";
-  if (score === "B") return "b";
-  if (score === "C") return "c";
-  return "";
-}
-function buildScoreGridHtml(m, selDay, selTime){
-  const head = `
-    <thead>
-      <tr>
-        <th style="width:18%"></th>
-        ${timeLabels.map(l => `<th>${l}</th>`).join("")}
-      </tr>
-    </thead>
-  `;
-  const bodyRows = [];
-  for (let d=0; d<=3; d++){
-    const dk = getDateKey(d);
-    const tds = timeSlots.map(t => {
-      const s = m.weather?.[dk]?.[t] ?? "-";
-      const base = scoreCellClass(s);
-      const sel = (d===selDay && t===selTime) ? "sel" : "";
-      return `<td class="${base} ${sel}">${s ?? "-"}</td>`;
-    }).join("");
-    bodyRows.push(`<tr><th>${escapeHtml(dayLabel(d))}</th>${tds}</tr>`);
-  }
-  return `
-    <b>スコア早見表（今日〜3日後 × 全時間帯）</b><br>
-    <table class="score-grid">
-      ${head}
-      <tbody>${bodyRows.join("")}</tbody>
-    </table>
-    <small>※ 選択中の日付×時間は枠線で強調</small>
-  `;
-}
-function fmt(n, digits=1){
-  if (n === null || n === undefined) return "-";
-  const v = Number(n);
-  return Number.isFinite(v) ? v.toFixed(digits) : "-";
-}
-function getDetail(m, dateKey, time){
-  return m.weather?._details?.[dateKey]?.[time] ?? null;
-}
-
-/* detail overlay */
-const detailOverlay = document.getElementById("detailOverlay");
-const detailTitle = document.getElementById("detailTitle");
-const detailBody = document.getElementById("detailBody");
-const detailClose = document.getElementById("detailClose");
-let currentDetail = null;
-
-function detailHtml(m, selectedTime){
-  const day = Number(daySelect.value);
-  const dateKey = getDateKey(day);
-  const grid = buildScoreGridHtml(m, day, selectedTime);
-
-  const rows = timeSlots.map((t, idx) => {
-    const s = m.weather?.[dateKey]?.[t] ?? "-";
-    const d = getDetail(m, dateKey, t);
-    const cls = (t === selectedTime) ? "wx-current" : "";
-    return `
-      <tr class="${cls}">
-        <td>${timeLabels[idx]}</td>
-        <td><b>${s ?? "-"}</b></td>
-        <td>${d ? fmt(d.precipitation,1) : "-"}</td>
-        <td>${d ? `${fmt(d.windspeed_mid,1)}→${fmt(d.windspeed_summit,1)}` : "-"}</td>
-        <td>${d ? `${fmt(d.gust_mid,1)}→${fmt(d.gust_summit,1)}` : "-"}</td>
-        <td>${d ? `${fmt(d.temp_mid,1)}→${fmt(d.temp_summit,1)}` : "-"}</td>
-      </tr>
-    `;
-  }).join("");
-
-  const setPills = m._sets?.size
-    ? [...m._sets].map(s => `<span class="setpill">${escapeHtml(setLabel(s))}</span>`).join("")
-    : "";
-
-  return `
-    <div>
-      <b>${escapeHtml(m.name)}</b>${setPills}<br>
-      標高：${m.elev ?? "-"} m / 難易度：${escapeHtml(m.level)}<br>
-      <small>座標: ${m.lat?.toFixed?.(5) ?? "-"}, ${m.lng?.toFixed?.(5) ?? "-"}</small>
-      <hr>${grid}
-      <hr>
-      <b>${escapeHtml(dayLabel(day))} の根拠（時間帯別）</b><br>
-      <table class="wx-table">
-        <thead>
-          <tr>
-            <th>時間</th><th>スコア</th><th>降水(mm)</th><th>風(m/s)</th><th>突風(m/s)</th><th>気温(℃)</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
-  `;
-}
-function openDetail(m, marker){
-  currentDetail = { mountain: m, marker };
-  detailTitle.textContent = m.name;
-  detailBody.innerHTML = detailHtml(m, getSelectedTime());
-  detailOverlay.classList.add("show");
-  detailOverlay.setAttribute("aria-hidden","false");
-  document.body.style.overflow = "hidden";
-}
-function closeDetail(){
-  detailOverlay.classList.remove("show");
-  detailOverlay.setAttribute("aria-hidden","true");
-  detailBody.innerHTML = "";
-  document.body.style.overflow = "";
-  currentDetail = null;
-}
-detailClose.onclick = closeDetail;
-detailOverlay.addEventListener("click", (e) => { if (e.target === detailOverlay) closeDetail(); });
-window.addEventListener("keydown", (e) => { if (e.key === "Escape" && detailOverlay.classList.contains("show")) closeDetail(); });
-
-/* merge fixed mountains */
+/* ====== merge ====== */
 const byName = new Map();
 function upsertMountain(base){
   const key = normName(base.name);
   if (!key) return null;
+
   const sets = new Set(base._sets ?? []);
   if (!byName.has(key)){
     byName.set(key, {
@@ -839,7 +339,38 @@ function upsertMountain(base){
 mountains.forEach(m => upsertMountain({ ...m, _sets:["HYAKU"] }));
 (mountainsExtra || []).forEach(m => upsertMountain({ ...m, _sets:Array.isArray(m._sets) ? m._sets : [] }));
 
-/* markers */
+/* ===== map ===== */
+const map = L.map("map").setView([36.5, 138], 5);
+L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/hillshademap/{z}/{x}/{y}.png",
+  { opacity: 0.5, attribution:"地理院 陰影" }
+).addTo(map);
+L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png",
+  { opacity: 0.85, attribution:"地理院 地図" }
+).addTo(map);
+
+const markerLayer = L.layerGroup().addTo(map);
+
+const icon = color => L.icon({
+  iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-${color}.png`,
+  shadowUrl: "https://unpkg.com/leaflet/dist/images/marker-shadow.png",
+  iconSize: [25,41],
+  iconAnchor: [12,41]
+});
+const icons = { A:icon("green"), B:icon("yellow"), C:icon("red") };
+const scorePriority = { A:3, B:2, C:1 };
+function getBestTime(weather, dateKey){
+  const w = weather?.[dateKey];
+  if (!w) return null;
+  let best = null;
+  for (const t of timeSlots){
+    const s = w[t];
+    if (!s) continue;
+    if (!best || scorePriority[s] > scorePriority[best.score]) best = { time:t, score:s };
+  }
+  return best;
+}
+
+/* ===== markers ===== */
 const markerEntries = [];
 const markerByKey = new Map();
 function addMarkerForMountain(m){
@@ -848,15 +379,11 @@ function addMarkerForMountain(m){
   if (m.lat == null || m.lng == null) return;
 
   const marker = L.marker([m.lat, m.lng], { icon: icons["C"] });
-  marker.on("click", () => {
-    map.setView([m.lat, m.lng], Math.max(map.getZoom(), 10));
-    openDetail(m, marker);
-  });
-
   markerEntries.push({ m, marker, shown:false });
   markerByKey.set(key, marker);
 }
 
+/* state */
 function getState(){
   const day = Number(daySelect.value);
   const time = getSelectedTime();
@@ -881,51 +408,10 @@ function mountainInSelectedSets(m, sets){
   return sets.some(s => ms.has(s));
 }
 
-/* list (pc+mobile) */
+/* list */
 const listEl = document.getElementById("list");
-const listHeaderEl = document.getElementById("listHeader");
 const listBodyEl = document.getElementById("listBody");
-const listTabEl = document.getElementById("listTab");
 function isMobile(){ return window.matchMedia && window.matchMedia("(max-width:768px)").matches; }
-let listCollapsed = false;
-function setListCollapsed(v){
-  listCollapsed = v;
-  if (isMobile()){
-    listEl.classList.toggle("is-collapsed", v);
-    listTabEl.classList.toggle("hidden", !v);
-  }else{
-    listEl.classList.remove("is-collapsed");
-    listTabEl.classList.add("hidden");
-  }
-}
-function initMobileListGestures(){
-  if (!isMobile()) return;
-  listTabEl.onclick = () => setListCollapsed(false);
-
-  let startY = 0, lastDy = 0, dragging = false;
-  listHeaderEl.addEventListener("touchstart", (e) => {
-    if (!e.touches?.length) return;
-    startY = e.touches[0].clientY; lastDy = 0; dragging = true; listEl.style.transition = "none";
-  }, { passive:true });
-
-  listHeaderEl.addEventListener("touchmove", (e) => {
-    if (!dragging || !e.touches?.length) return;
-    const y = e.touches[0].clientY;
-    const dy = Math.max(0, y - startY);
-    lastDy = dy;
-    listEl.style.transform = `translateY(${Math.min(dy, 260)}px)`;
-  }, { passive:true });
-
-  listHeaderEl.addEventListener("touchend", () => {
-    if (!dragging) return;
-    dragging = false;
-    listEl.style.transition = "";
-    listEl.style.transform = "";
-    if (lastDy > 120) setListCollapsed(true);
-  });
-
-  window.addEventListener("resize", () => setListCollapsed(isMobile() ? listCollapsed : false));
-}
 
 function drawList(items, day){
   const target = isMobile() ? listBodyEl : listEl;
@@ -935,7 +421,7 @@ function drawList(items, day){
     target.innerHTML = `<b>${escapeHtml(dayLabel(day))} の山</b><br>`;
   }
 
-  items.forEach(({ m, best, marker }) => {
+  items.forEach(({ m, best }) => {
     const setPills = m._sets?.size
       ? [...m._sets].map(s => `<span class="setpill">${escapeHtml(setLabel(s))}</span>`).join("")
       : "";
@@ -943,18 +429,11 @@ function drawList(items, day){
     const div = document.createElement("div");
     div.className = "list-item";
     div.innerHTML = `
-      <b>${escapeHtml(m.name)}</b>
-      ${best?.score==="A" ? "<span class='star'>★</span>" : ""}
-      ${setPills}
-      <br>
-      標高:${m.elev ?? "-"}m / ${escapeHtml(m.level)}<br>
-      ベスト:${best ? `${best.time}（${best.score}）` : "-"}
+      <b>${escapeHtml(m.name)}</b> ${best?.score==="A" ? "<span class='star'>★</span>" : ""} ${setPills}
+      <br>標高:${m.elev ?? "-"}m / ${escapeHtml(m.level)}
+      <br>ベスト:${best ? `${best.time}（${best.score}）` : "-"}
     `;
-    div.onclick = () => {
-      if (isMobile()) setListCollapsed(true);
-      map.setView([m.lat, m.lng], 11);
-      openDetail(m, marker);
-    };
+    div.onclick = () => map.setView([m.lat, m.lng], 11);
     target.appendChild(div);
   });
 }
@@ -982,45 +461,20 @@ function updateView(){
         entry.shown = true;
       }
       marker.setIcon(icons[score]);
-      const best = getBestTime(m.weather, dateKey);
-      items.push({ m, best, marker });
+      items.push({ m, best: getBestTime(m.weather, dateKey) });
     }else{
       if (entry.shown){
         markerLayer.removeLayer(marker);
         entry.shown = false;
       }
-      if (currentDetail?.mountain === m) closeDetail();
     }
   }
 
   drawList(items, day);
-
-  if (currentDetail?.mountain){
-    detailTitle.textContent = currentDetail.mountain.name;
-    detailBody.innerHTML = detailHtml(currentDetail.mountain, time);
-  }
-
   setTimeout(() => map.invalidateSize(), 60);
 }
 
-/* build buttons */
-buildBtn.addEventListener("click", async () => {
-  buildBtn.disabled = true;
-  try{
-    await buildExtraOnce();
-  }finally{
-    buildBtn.disabled = false;
-  }
-});
-resetBtn.addEventListener("click", () => {
-  localStorage.removeItem(BUILD_STATE_KEY);
-  exportHint.className = "chip";
-  exportHint.style.display = "inline-block";
-  exportHint.textContent = "生成進捗をリセットしました";
-  setTimeout(() => { exportHint.style.display="none"; }, 3000);
-});
-
-/* init */
+/* ===== init ===== */
 async function init(){
   initDaySelectLabels();
   if (Number(daySelect.value) === 0) setSliderIndex(nearestTimeSlotIndexNow());
@@ -1030,30 +484,36 @@ async function init(){
 
   setStatusHtml([
     `固定データ統合: 合計${all.length}件 / 座標あり${geoOK.length}件`,
-    `※自動座標取得はボタン押下時のみ（通常利用は高速）`,
-    `生成オプション: ${[
-      optExcludeNonPeak.checked ? "非山除外ON" : "非山除外OFF",
-      optStrictJapan.checked ? "日本bboxON" : "日本bboxOFF",
-      optUseSearch.checked ? "Wiki検索ON" : "Wiki検索OFF",
-      optUseGeocode.checked ? "GeocodeON" : "GeocodeOFF",
-    ].join(" / ")}`
+    `天気取得はレート制限対策で「同時2本＋429リトライ」`
   ]);
 
   for (const m of geoOK) addMarkerForMountain(m);
 
-  await Promise.all(geoOK.map(async m => {
-    if (!m.weather || Object.keys(m.weather).length === 0){
-      m.weather = await generateWeatherScore(m.name, m.lat, m.lng, m.level, m.elev);
+  // ★ここが429対策：Promise.allで一気に叩かない
+  const tasks = geoOK.map((m) => async () => {
+    if (m.weather && Object.keys(m.weather).length) return;
+    m.weather = await withRetry(
+      () => generateWeatherScore(m.name, m.lat, m.lng, m.level, m.elev),
+      { maxRetries: 6, baseDelayMs: 900, maxDelayMs: 15000 }
+    );
+  });
+
+  let lastShown = 0;
+  await runWithConcurrency(tasks, 2, (done, total) => {
+    // 更新頻度を抑える（ちらつき防止）
+    if (done - lastShown >= 10 || done === total){
+      lastShown = done;
+      setStatusHtml([
+        `固定データ統合: 合計${all.length}件 / 座標あり${geoOK.length}件`,
+        `天気取得: ${done}/${total}（同時2本 / 429は待って再試行）`
+      ]);
     }
-  }));
+  });
 
   document.querySelectorAll("#control input,#control select").forEach(e => {
     if (e === daySelect) return;
     e.addEventListener("change", () => updateView());
   });
-
-  initMobileListGestures();
-  setListCollapsed(isMobile() ? true : false);
 
   updateView();
 }
