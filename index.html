@@ -6,6 +6,8 @@
 <title>登山向け山岳マップ</title>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<!-- favicon 404 を黙らせたい場合（任意） -->
+<link rel="icon" href="data:,">
 
 <style>
   body { margin:0; font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; }
@@ -286,7 +288,7 @@
   </div>
 
   <div class="group">
-    <span id="setStatus" style="font-size:12px;color:#444;"></span>
+    <span id="setStatus" style="font-size:12px;color:#444; max-width: 72vw;"></span>
   </div>
 </div>
 
@@ -332,6 +334,12 @@ const slider = document.getElementById("timeSlider");
 const timeLabel = document.getElementById("timeLabel");
 const daySelect = document.getElementById("day");
 const setStatus = document.getElementById("setStatus");
+
+function setStatusHtml(lines){
+  // lines: string[]
+  const safe = (lines || []).filter(Boolean).slice(0, 8).map(s => escapeHtml(s));
+  setStatus.innerHTML = safe.join("<br>");
+}
 
 function nearestTimeSlotIndexNow(){
   const now = new Date();
@@ -430,7 +438,7 @@ function fmtJpDateTime(iso){
   if (!iso) return "-";
   const d = new Date(iso);
   if (!Number.isFinite(d.getTime())) return "-";
-  return `${d.getFullYear()}/${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  return `${d.getFullYear()}/${pad2(d.getMonth()+1)}/${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 function timeAgo(iso){
   if (!iso) return "-";
@@ -533,6 +541,7 @@ mountains.forEach(m => upsertMountain({ ...m, _sets:["HYAKU"] }));
 
 /* ===== セットロード管理（山名だけ） ===== */
 const loadedSetKeys = new Set();
+const setLoadInfo = new Map(); // setKey -> {count, cached}
 
 /* ===== Geocoding（Open-Meteo） + overrides ===== */
 const GEO_CACHE_KEY = "mount_geo_openmeteo_v2";
@@ -629,7 +638,8 @@ async function ensureSetLoaded(setKey){
   if (loadedSetKeys.has(setKey)) return;
   if (!SET_DEFS?.[setKey]) return;
 
-  setStatus.textContent = `${setLabel(setKey)}: 山名取得中...`;
+  setStatusHtml([`${setLabel(setKey)}: 山名取得中...`]);
+
   const { names, meta } = await loadSetNames(setKey);
 
   for (const name of names){
@@ -652,10 +662,20 @@ async function ensureSetLoaded(setKey){
   }
 
   loadedSetKeys.add(setKey);
-  setStatus.textContent = `${setLabel(setKey)}: ${names.length}件（${meta?.cached ? "cache" : "fresh"}）`;
+  setLoadInfo.set(setKey, { count: names.length, cached: !!meta?.cached });
+
+  // ✅ デバッグ：ロード件数表示
+  const lines = [];
+  lines.push(`✅ ${setLabel(setKey)} ロード完了: ${names.length}件（${meta?.cached ? "cache" : "fresh"}）`);
+  const selected = getState().sets.filter(s => s !== "HYAKU");
+  if (selected.length){
+    lines.push(`選択中: ${selected.map(setLabel).join(" / ")}`);
+    lines.push(`ロード済: ${[...loadedSetKeys].map(setLabel).join(" / ")}`);
+  }
+  setStatusHtml(lines);
 }
 
-/* ===== 追加処理（座標→天気→マーカー） ===== */
+/* ===== 追加処理（座標→天気→マーカー） + デバッグ ===== */
 let resolving = false;
 async function resolveForEnabledSets(){
   if (resolving) return;
@@ -666,20 +686,35 @@ async function resolveForEnabledSets(){
   const pending = [];
   for (const m of byName.values()){
     if (!mountainInSelectedSets(m, sets)) continue;
-    if (m.lat != null && m.lng != null && m.weather && Object.keys(m.weather).length) continue;
+    const hasGeo = (m.lat != null && m.lng != null);
+    const hasWx = (m.weather && Object.keys(m.weather).length);
+    if (hasGeo && hasWx) continue;
     pending.push(m);
   }
-  if (!pending.length) return;
+  if (!pending.length){
+    setStatusHtml([`追加処理: 対象なし（すべて解決済）`]);
+    return;
+  }
 
   resolving = true;
   let okGeo=0, ngGeo=0, okWx=0, ngWx=0;
+  const ngNames = [];
+  const batch = pending.slice(0, 40);
 
-  // 安全のため 40件ずつ
-  for (const m of pending.slice(0, 40)){
+  setStatusHtml([
+    `追加処理: ${batch.length}件 実行中...`,
+    `（対象残り: ${pending.length}件）`
+  ]);
+
+  for (const m of batch){
     try{
       if (m.lat == null || m.lng == null){
         const g = await resolveGeo(m.name);
-        if (!g){ ngGeo++; continue; }
+        if (!g){
+          ngGeo++;
+          if (ngNames.length < 10) ngNames.push(m.name);
+          continue;
+        }
         m.lat = g.lat; m.lng = g.lng;
         if (m.elev == null && g.elev != null) m.elev = Math.round(g.elev);
         okGeo++;
@@ -699,11 +734,22 @@ async function resolveForEnabledSets(){
       }
     }catch{
       ngGeo++;
+      if (ngNames.length < 10) ngNames.push(m.name);
     }
   }
 
   resolving = false;
-  setStatus.textContent = `追加処理: 座標OK${okGeo}/NG${ngGeo} 天気OK${okWx}/NG${ngWx}（続きはもう一度操作）`;
+
+  const remaining = pending.length - batch.length;
+
+  const lines = [];
+  lines.push(`追加処理: 座標OK${okGeo}/NG${ngGeo} 天気OK${okWx}/NG${ngWx}`);
+  lines.push(`残り（未解決）: ${remaining}件  ※もう一度操作で続きを処理`);
+  if (ngNames.length){
+    lines.push(`座標NG例: ${ngNames.join(" / ")}`);
+    lines.push(`（対策: GEO_OVERRIDES 追記 or 山名の表記ゆれ対応）`);
+  }
+  setStatusHtml(lines);
 }
 
 /* ===== 詳細 ===== */
@@ -947,6 +993,7 @@ async function init(){
   initMobileListGestures();
   setListCollapsed(isMobile() ? true : false);
 
+  setStatusHtml([`初期化完了（百名山:${baseList.length}座）`]);
   updateView();
 }
 init();
