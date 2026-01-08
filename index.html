@@ -269,7 +269,7 @@
     #listTab.hidden{ display:none; }
   }
 
-  /* ===== coord editor overlay ===== */
+  /* ===== coord editor overlay (保険) ===== */
   #coordOverlay{
     position:fixed;
     inset:0;
@@ -464,7 +464,7 @@
 <div id="coordOverlay" aria-hidden="true">
   <div id="coordPanel" role="dialog" aria-modal="true" aria-label="座標修正">
     <div id="coordHeader">
-      <b>座標修正（座標NG/手動override）</b>
+      <b>座標修正（最小限の保険）</b>
       <button id="coordClose" type="button">閉じる</button>
     </div>
     <div id="coordBody">
@@ -479,7 +479,7 @@
             <button id="refreshCoordList" class="btn" type="button">更新</button>
           </div>
           <div id="coordList" class="coord-list"></div>
-          <small>※ ここに「座標NG例」や未解決の山が溜まります。クリックして右で入力。</small>
+          <small>※ 原則は自動で埋まる想定。どうしても残った時だけここを使う。</small>
         </div>
 
         <div class="card">
@@ -530,7 +530,7 @@
           </div>
 
           <small>
-            入力元のおすすめ：国土地理院地図 / YAMAP / ヤマレコなどで山頂をクリックして緯度経度（10進）をコピー。
+            座標入力元おすすめ：国土地理院地図 / YAMAP / ヤマレコ。山頂クリック→緯度経度（10進）をコピペ。
           </small>
         </div>
       </div>
@@ -775,14 +775,27 @@ function saveManualOverrides(obj){
 }
 let manualOverrides = loadManualOverrides();
 
-/* ===== geocoding cache ===== */
+/* ===== geocoding cache (Open-Meteo) ===== */
 const GEO_CACHE_KEY = "mount_geo_openmeteo_v2";
 const geoCache = (() => { try { return JSON.parse(localStorage.getItem(GEO_CACHE_KEY)||"{}")||{}; } catch { return {}; } })();
 function saveGeoCache(){ try { localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(geoCache)); } catch {} }
 
+/* ===== Wikipedia座標cache ===== */
+const WIKI_API = "https://ja.wikipedia.org/w/api.php";
+const WIKI_COORD_CACHE_KEY = "mount_wiki_coord_cache_v1";
+const wikiCoordCache = (() => {
+  try { return JSON.parse(localStorage.getItem(WIKI_COORD_CACHE_KEY) || "{}") || {}; }
+  catch { return {}; }
+})();
+function saveWikiCoordCache(){
+  try { localStorage.setItem(WIKI_COORD_CACHE_KEY, JSON.stringify(wikiCoordCache)); } catch {}
+}
+
 function isJapanLike(lat,lng){
   return lat >= 24 && lat <= 46.5 && lng >= 122 && lng <= 146.5;
 }
+
+/* ===== Open-Meteo Geocoding ===== */
 async function openMeteoGeocode(query){
   const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=10&language=ja&format=json`;
   const res = await fetch(url);
@@ -797,11 +810,74 @@ async function openMeteoGeocode(query){
   const elev = (jp.elevation != null && Number.isFinite(Number(jp.elevation))) ? Number(jp.elevation) : null;
   return { lat, lng, elev };
 }
+
+/* ===== Wikipedia座標取得 ===== */
+async function fetchWikiCoord(title){
+  const key = normName(title);
+  if (!key) return null;
+
+  if (wikiCoordCache[key]) return { ...wikiCoordCache[key], source: "wiki_cache" };
+
+  const params = new URLSearchParams({
+    action: "query",
+    format: "json",
+    origin: "*",
+    redirects: "1",
+    prop: "coordinates",
+    colimit: "1",
+    titles: title
+  });
+
+  const url = `${WIKI_API}?${params.toString()}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`wiki coord ${res.status}`);
+  const j = await res.json();
+  const pages = j?.query?.pages;
+  if (!pages) return null;
+
+  const page = Object.values(pages)[0];
+  const c = page?.coordinates?.[0];
+  if (!c) return null;
+
+  const lat = Number(c.lat);
+  const lng = Number(c.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  const got = { lat, lng, elev: null };
+  wikiCoordCache[key] = got;
+  saveWikiCoordCache();
+  return { ...got, source: "wiki" };
+}
+
+function buildTitleCandidates(name){
+  const n = String(name || "").trim();
+  const cands = [];
+
+  cands.push(n);
+
+  // “峠” は山頂記事に寄せると取れることがある
+  if (n.endsWith("峠")) cands.push(n.replace(/峠$/, "嶺"));
+
+  // ヶ/ケ ゆれ
+  cands.push(n.replace(/ケ/g, "ヶ"));
+  cands.push(n.replace(/ヶ/g, "ケ"));
+
+  // 末尾が山っぽくないなら山を付ける
+  if (!/[山岳峰嶺]$/.test(n)) cands.push(n + "山");
+
+  // “(日本)” の曖昧さ回避（記事名がこうなってる場合がある）
+  cands.push(n + " (日本)");
+
+  // 重複除去
+  return [...new Set(cands)].filter(Boolean);
+}
+
+/* ===== resolveGeo（自動化の本体） ===== */
 async function resolveGeo(name){
   const key = normName(name);
   if (!key) return null;
 
-  // ① 手動override（最優先）
+  // ① 手動override（保険）
   const mo = manualOverrides?.[key] || manualOverrides?.[name];
   if (mo?.lat != null && mo?.lng != null){
     return { lat:Number(mo.lat), lng:Number(mo.lng), elev:(mo.elev!=null?Number(mo.elev):null), source:"manual" };
@@ -813,10 +889,17 @@ async function resolveGeo(name){
     return { lat:Number(ov.lat), lng:Number(ov.lng), elev:(ov.elev!=null?Number(ov.elev):null), source:"override" };
   }
 
-  // ③ キャッシュ
+  // ③ Wikipedia座標（最優先の自動）
+  for (const t of buildTitleCandidates(name)){
+    try{
+      const w = await fetchWikiCoord(t);
+      if (w) return w;
+    }catch{}
+  }
+
+  // ④ Open-Meteo（最後の保険）
   if (geoCache[key]) return { ...geoCache[key], source:"cache" };
 
-  // ④ geocoding
   const tries = [name, `${name} 日本`, `${name} 山 日本`];
   for (const q of tries){
     try{
@@ -828,6 +911,7 @@ async function resolveGeo(name){
       }
     }catch{}
   }
+
   return null;
 }
 
@@ -906,17 +990,15 @@ async function ensureSetLoaded(setKey){
   setStatusHtml([`✅ ${setLabel(setKey)} ロード完了: ${names.length}件（${meta?.cached ? "cache" : "fresh"}）`]);
 }
 
-/* ===== 座標NGを溜める（手動入力候補リスト） ===== */
+/* ===== 座標NGを溜める（保険UI用） ===== */
 const pendingGeoSet = new Set(); // normName
 function addPendingGeoName(name){
   const k = normName(name);
   if (!k) return;
-  // すでに手動overrideがあるなら候補に入れない
   if (manualOverrides?.[k]?.lat != null && manualOverrides?.[k]?.lng != null) return;
   pendingGeoSet.add(k);
   refreshCoordBadge();
 }
-
 function refreshCoordBadge(){
   const chip = document.getElementById("coordCount");
   const count = pendingGeoSet.size;
@@ -998,10 +1080,10 @@ async function resolveForEnabledSets(){
   const remaining = pending.length - batch.length;
   const lines = [];
   lines.push(`追加処理: 座標OK${okGeo}/NG${ngGeo} 天気OK${okWx}/NG${ngWx}`);
-  lines.push(`残り（未解決）: ${remaining}件  ※もう一度操作で続きを処理`);
+  lines.push(`残り（未解決）: ${remaining}件 ※もう一度操作で続きを処理`);
   if (ngNames.length){
     lines.push(`座標NG例: ${ngNames.join(" / ")}`);
-    lines.push(`（対策: 座標修正で手入力→保存）`);
+    lines.push(`（対策: 原則自動。残ったら座標修正で最小限だけ手入力）`);
   }
   setStatusHtml(lines);
 }
@@ -1219,7 +1301,7 @@ function updateView(){
   setTimeout(() => map.invalidateSize(), 60);
 }
 
-/* ===== 座標修正UI ===== */
+/* ===== 座標修正UI（保険） ===== */
 const coordOverlay = document.getElementById("coordOverlay");
 const coordClose = document.getElementById("coordClose");
 const openCoord = document.getElementById("openCoord");
@@ -1262,27 +1344,18 @@ window.addEventListener("keydown", (e) => {
 });
 
 function getUnresolvedNames(){
-  // ① pendingGeoSet（直近のNG）
   const names = new Set([...pendingGeoSet]);
-
-  // ② 選択セットで「座標なし」のものも候補に
   const { sets } = getState();
   for (const m of byName.values()){
     if (!mountainInSelectedSets(m, sets)) continue;
     const k = normName(m.name);
     if (!k) continue;
     if (m.lat == null || m.lng == null){
-      // ただし手動overrideが既にあるなら候補から外す
       const mo = manualOverrides?.[k];
       if (!(mo?.lat != null && mo?.lng != null)) names.add(k);
     }
   }
-
-  // ③ 既に手動overrideがあるものも編集対象に含める（一覧の後半に）
-  for (const k of Object.keys(manualOverrides || {})){
-    names.add(k);
-  }
-
+  for (const k of Object.keys(manualOverrides || {})) names.add(k);
   return [...names].sort((a,b) => a.localeCompare(b, "ja"));
 }
 
@@ -1307,8 +1380,6 @@ function refreshCoordList(){
 
 function selectCoordKey(k){
   selectedCoordKey = k;
-
-  // 表示用の元山名（byNameにあるならそれ）
   const m = byName.get(k);
   const displayName = m?.name || k;
 
@@ -1347,14 +1418,12 @@ btnSave.onclick = async () => {
   manualOverrides[selectedCoordKey] = { lat, lng, elev, note };
   saveManualOverrides(manualOverrides);
 
-  // byName 側に即反映
   const m = tryGetSelectedMountain();
   if (m){
     m.lat = lat; m.lng = lng;
     if (elev != null && Number.isFinite(elev)) m.elev = Math.round(elev);
     addMarkerForMountain(m);
 
-    // 天気が未取得なら取る（軽く）
     if (!m.weather || Object.keys(m.weather).length === 0){
       try{
         m.weather = await generateWeatherScore(m.name, m.lat, m.lng, m.level, m.elev);
@@ -1362,7 +1431,6 @@ btnSave.onclick = async () => {
     }
   }
 
-  // pendingから除外
   pendingGeoSet.delete(selectedCoordKey);
   refreshCoordBadge();
   refreshCoordList();
@@ -1409,7 +1477,6 @@ btnImport.onclick = () => {
   try{
     const obj = JSON.parse(taJson.value || "{}");
     if (!obj || typeof obj !== "object") throw new Error("invalid");
-    // マージ
     manualOverrides = { ...(manualOverrides || {}), ...obj };
     saveManualOverrides(manualOverrides);
     refreshCoordList();
