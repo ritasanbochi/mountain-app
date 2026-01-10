@@ -1,35 +1,35 @@
-// mountaimSets.js (v8)
-// 目的：Wikipediaから「山名リスト」を安定取得（0件を防ぐ）＋ localStorage Quota超過を回避
-// 方針：
-// - 花100/二百/三百すべて "parse&prop=links" で取得（HTML table依存を排除）
-// - 「山っぽいタイトル」だけ残す（山/岳/峰/ヶ岳 など）
-// - キャッシュ保存は try/catch、サイズが大きすぎる場合は保存スキップ
-// - デバッグ用にサンプル10件を返せるようにする
+// mountaimSets.js (v10)
+// 目的：Wikipediaから「山名リスト」を安定取得しつつ、localStorage Quota超過を回避する
+// - cacheは「小さく」「保存失敗しても処理継続」
+// - 過去の空キャッシュを読まない（prefixを上げる）
+// - 取得元を "links" で統一（HTML依存を減らす）
+// - 混入（沼/湿原/峠/会社等）を強めに落とす
 
 export const GEO_OVERRIDES = {
-  // 必要最小限のみ手動追加（最後の数件だけ）
+  // 最後に残ったNGだけ最小限ここへ
+  // 例:
   // "黒檜山": { lat: 36.5609, lng: 139.1936, elev: 1828 },
 };
 
-// index.html 側が import する
 export const SET_DEFS = {
   HYAKU:      { label: "百名山",       wikiPage: null },
   HANA_100:   { label: "花の百名山",   wikiPage: "花の百名山" },
-  NIHON_200:  { label: "二百名山",     wikiPage: "Template:日本二百名山" },
-  NIHON_300:  { label: "三百名山",     wikiPage: "Template:日本三百名山" },
+  // templateより「記事ページ」優先（templateは余計なリンクが混じりやすい）
+  NIHON_200:  { label: "二百名山",     wikiPage: "日本二百名山" },
+  NIHON_300:  { label: "三百名山",     wikiPage: "日本三百名山" },
 };
 
 export const SET_LABELS = Object.fromEntries(Object.entries(SET_DEFS).map(([k,v]) => [k, v.label]));
 
 const WIKI_API = "https://ja.wikipedia.org/w/api.php";
 
-// ★ バージョンを上げて、以前の「空キャッシュ」を読まないようにする
-const CACHE_PREFIX = "mount_set_names_v8";
-const CACHE_TTL_MS = 60 * 24 * 60 * 60 * 1000; // 60日
+// ★ prefix更新：古い/空キャッシュを読まない
+const CACHE_PREFIX = "mount_set_names_v10";
+const CACHE_TTL_MS = 45 * 24 * 60 * 60 * 1000; // 45日
 
-// ★ 保存サイズが大きすぎるとQuota超過するので、上限を設ける（十分余裕）
-const MAX_SAVE_NAMES = 450;     // 保存する最大件数
-const MAX_RETURN_NAMES = 600;   // 返す最大件数（保存せず返すのはOK）
+// ★ 保存は控えめ（Quota対策）
+const MAX_SAVE_NAMES = 220;   // 保存する最大件数
+const MAX_RETURN_NAMES = 650; // 返す最大件数（保存しない分はOK）
 
 function cacheKey(setKey){ return `${CACHE_PREFIX}:${setKey}`; }
 function safeJsonParse(s){ try{ return JSON.parse(s); }catch{ return null; } }
@@ -43,23 +43,22 @@ function normalizeName(s){
     .replace(/[（(].*?[）)]/g, "");
 }
 
-// 山名っぽいか（ゆるめ：取りこぼしを減らす）
+// 山名っぽい判定（強め）
 function looksMountainish(name){
   if (!name) return false;
 
-  // 明らかなノイズを除外
-  if (name.startsWith("Wikipedia:") || name.startsWith("Help:") || name.startsWith("Portal:")) return false;
-  if (name.startsWith("Category:") || name.startsWith("File:") || name.startsWith("Template:")) return false;
+  // namespace系
+  if (/^(Wikipedia|Help|Portal|Category|File|Template):/.test(name)) return false;
 
-  // 組織・施設系を除外
-  if (/(新聞|新聞社|会社|株式会社|協会|連盟|財団|法人|大学|研究所|病院|鉄道|駅|市|町|村|空港|港|ダム)$/u.test(name)) return false;
+  // 組織・施設・地名・水場等（強めに除外）
+  if (/(新聞|新聞社|会社|株式会社|協会|連盟|財団|法人|大学|研究所|病院|鉄道|駅|市|町|村|空港|港|ダム|美術館|博物館)$/u.test(name)) return false;
+  if (/(沼|湿原|高原|ヶ原|原|峠|岬|浜|滝|湖|川|池|渓谷|谷|社|寺|神社|公園)$/u.test(name)) return false;
 
-  // “山”を含む or “岳/峰”を含む（一般的な山名の大半を通す）
+  // 山/岳/峰 を含むものを基本採用
   if (/山|岳|峰/u.test(name)) return true;
 
-  // 例外的に「○○ヶ岳」や「○○ヶ峰」系（normalizeで残る想定）
-  if (/ヶ岳|ヶ峰/u.test(name)) return true;
-
+  // 例外的な山名の補助（必要なら増やす）
+  // 例: "三嶺" "三瓶山" などは上で拾える想定（山が含まれる）
   return false;
 }
 
@@ -97,11 +96,12 @@ function loadCache(setKey){
   const obj = safeJsonParse(raw);
   if (!obj?.fetchedAtMs || !Array.isArray(obj?.names)) return null;
   if (Date.now() - obj.fetchedAtMs > CACHE_TTL_MS) return null;
+  // 0件キャッシュは信用しない（過去バグ対策）
+  if (obj.names.length === 0) return null;
   return obj;
 }
 
 function trySaveCache(setKey, names, meta){
-  // 保存は上限までに切る（Quota対策）
   const toSave = names.slice(0, MAX_SAVE_NAMES);
   const payload = {
     fetchedAt: new Date().toISOString(),
@@ -121,7 +121,7 @@ function trySaveCache(setKey, names, meta){
 /**
  * 山セットの山名リストを取得
  * @param {"HANA_100"|"NIHON_200"|"NIHON_300"} setKey
- * @returns {Promise<{names: string[], meta: {cached:boolean, fetchedAt:string|null, count:number, sample:string[]}}>}
+ * @returns {Promise<{names: string[], meta: {cached:boolean, fetchedAt:string|null, count:number, sample:string[]}}>}}
  */
 export async function loadSetNames(setKey){
   const def = SET_DEFS[setKey];
@@ -143,9 +143,9 @@ export async function loadSetNames(setKey){
   const { url, json } = await wikiParseLinks(def.wikiPage);
   let names = extractFromParseLinks(json?.parse);
 
-  // 返却上限（万一の巨大化対策）
   if (names.length > MAX_RETURN_NAMES) names = names.slice(0, MAX_RETURN_NAMES);
 
+  // 保存は軽量に。失敗しても返却はする
   trySaveCache(setKey, names, { url, page: def.wikiPage, mode: "links" });
 
   return {
@@ -159,7 +159,17 @@ export async function loadSetNames(setKey){
   };
 }
 
-// デバッグ用：キャッシュ削除
+// 個別キャッシュ削除
 export function clearSetCache(setKey){
-  localStorage.removeItem(cacheKey(setKey));
+  try{ localStorage.removeItem(cacheKey(setKey)); }catch{}
+}
+
+// 全キャッシュ削除（ボタン用）
+export function clearAllSetCaches(){
+  try{
+    for (const k of Object.keys(SET_DEFS)){
+      if (k === "HYAKU") continue;
+      clearSetCache(k);
+    }
+  }catch{}
 }

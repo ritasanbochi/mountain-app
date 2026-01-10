@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>登山向け山岳マップ</title>
 
-<!-- ★ CDNを安定系に変更（unpkgjs.com問題回避） -->
+<!-- Leaflet (安定CDN) -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous">
 <link rel="icon" href="data:,">
 
@@ -69,6 +69,7 @@
   .score-grid th{ background:#f7f7f7; font-weight:600; }
   .score-grid .sel{ outline:2px solid #5aa7ff; outline-offset:-2px; font-weight:800; background:#eef6ff; }
   .score-grid .a{ background:#eaf7ee; } .score-grid .b{ background:#fff7db; } .score-grid .c{ background:#ffe7e7; }
+  .score-grid .p{ background:#f2f2f2; color:#666; } /* pending */
 
   #listHeader{ display:none; } #listTab{ display:none; }
   @media (max-width:768px){
@@ -129,6 +130,7 @@
     <label><input type="checkbox" value="A" checked>A</label>
     <label><input type="checkbox" value="B" checked>B</label>
     <label><input type="checkbox" value="C" checked>C</label>
+    <label><input type="checkbox" value="P" checked>未取得</label>
   </div>
 
   <div class="group">
@@ -143,6 +145,7 @@
     <b>固定化</b>
     <button id="buildExtra" class="btn" type="button">山リスト取得→座標固定化（mountains_extra.js生成）</button>
     <button id="resetBuild" class="btn" type="button">進捗リセット</button>
+    <button id="clearWikiCache" class="btn" type="button">山名キャッシュ削除</button>
     <span class="chip" id="exportHint" style="display:none;"></span>
   </div>
 
@@ -177,14 +180,13 @@
   </div>
 </div>
 
-<!-- ★ CDNを安定系に変更 -->
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
 
 <script type="module">
 import mountains from "./mountains.js";
 import mountainsExtra from "./mountains_extra.js";
 import { generateWeatherScore } from "./weather.js";
-import { loadSetNames, GEO_OVERRIDES, SET_DEFS } from "./mountaimSets.js";
+import { loadSetNames, GEO_OVERRIDES, SET_DEFS, clearAllSetCaches } from "./mountaimSets.js";
 
 /* ========= utilities ========= */
 const timeSlots  = ["06:00","08:00","10:00","12:00","14:00","16:00"];
@@ -196,8 +198,9 @@ const setStatus = document.getElementById("setStatus");
 const exportHint = document.getElementById("exportHint");
 const buildBtn = document.getElementById("buildExtra");
 const resetBtn = document.getElementById("resetBuild");
+const clearWikiCacheBtn = document.getElementById("clearWikiCache");
 
-const BUILD_STATE_KEY = "mountains_extra_build_v1";
+const BUILD_STATE_KEY = "mountains_extra_build_v2"; // v2
 function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
 function escapeHtml(s){
@@ -206,7 +209,7 @@ function escapeHtml(s){
   }[c]));
 }
 function setStatusHtml(lines){
-  const safe = (lines || []).filter(Boolean).slice(0, 18).map(s => escapeHtml(s));
+  const safe = (lines || []).filter(Boolean).slice(0, 22).map(s => escapeHtml(s));
   setStatus.innerHTML = safe.join("<br>");
 }
 function pad2(n){ return String(n).padStart(2, "0"); }
@@ -253,7 +256,7 @@ daySelect.addEventListener("change", () => {
 const getSelectedTime = () => timeSlots[Number(slider.value)];
 
 function normName(s){
-  return String(s ?? "").trim().replace(/\s+/g,"").replace(/[（(].*?[）)]/g,"");
+  return String(s ?? "").trim().replace(/\s+/g,"").replace(/\[.*?\]/g,"").replace(/[（(].*?[）)]/g,"");
 }
 function setLabel(k){
   if (k === "HYAKU") return "百名山";
@@ -431,7 +434,6 @@ function chosenExtraSetKeys(){
   const selected = [...document.querySelectorAll(".setChk:checked")].map(e => e.value);
   return selected.filter(s => s !== "HYAKU");
 }
-
 function mergeMembership(map, name, setKey){
   const k = normName(name);
   if (!k) return;
@@ -439,12 +441,12 @@ function mergeMembership(map, name, setKey){
   else map.get(k)._sets.add(setKey);
 }
 
-// “山じゃない”混入を固定化対象から落とす（ここで最終防波堤）
+// “山じゃない”混入を固定化対象から落とす（最終防波堤）
 function looksNonMountainSpot(name){
   const s = String(name ?? "");
   const hasMountainWord = /山|岳|峰/u.test(s);
   if (hasMountainWord) return false;
-  return /(沼|湿原|高原|ヶ原|原|峠|岬|浜|滝|湖|新聞社|会社|駅)$/u.test(s);
+  return /(沼|湿原|高原|ヶ原|原|峠|岬|浜|滝|湖|川|池|渓谷|谷|社|寺|神社|公園|駅)$/u.test(s);
 }
 
 async function buildExtra(){
@@ -458,12 +460,13 @@ async function buildExtra(){
   try{
     const meta = [];
     const map = new Map();
-
     const hyaku = new Set(mountains.map(m => normName(m.name)));
 
+    // 1) set names
     for (const k of targets){
       meta.push(`山名取得中: ${setLabel(k)} ...`);
       setStatusHtml(meta);
+
       const { names, meta: m } = await loadSetNames(k);
       meta.push(`  ${setLabel(k)}: ${names.length}件（${m.cached ? "cache" : "fresh"}）`);
       setStatusHtml(meta);
@@ -471,7 +474,7 @@ async function buildExtra(){
       for (const n of names){
         const nn = normName(n);
         if (!nn || hyaku.has(nn)) continue;
-        if (looksNonMountainSpot(n)) continue; // ★混入カット
+        if (looksNonMountainSpot(n)) continue;
         mergeMembership(map, n, k);
       }
     }
@@ -479,9 +482,11 @@ async function buildExtra(){
     const namesAll = [...map.values()];
     const total = namesAll.length;
 
+    // 2) build state
     let st = loadBuildState();
-    if (!st || JSON.stringify(st.targets) !== JSON.stringify(targets)){
-      st = { createdAt:new Date().toISOString(), targets, total, done:{}, ng:{} };
+    const targetSig = JSON.stringify(targets.slice().sort());
+    if (!st || st.targetSig !== targetSig){
+      st = { createdAt:new Date().toISOString(), targets, targetSig, total, done:{}, ng:{} };
       saveBuildState(st);
     }else{
       st.total = total;
@@ -491,6 +496,7 @@ async function buildExtra(){
     const start = Date.now();
     let ok = 0, ng = 0;
 
+    // 3) resolve coords
     for (let i=0; i<namesAll.length; i++){
       const item = namesAll[i];
       const key = normName(item.name);
@@ -499,7 +505,8 @@ async function buildExtra(){
 
       setStatusHtml([
         `座標取得 ${i+1}/${total}: ${item.name}`,
-        `OK:${ok} / NG:${ng}`
+        `OK:${ok} / NG:${ng}`,
+        `（進捗は端末内保存。ブラウザを閉じても続きから）`
       ]);
 
       const r = await resolveCoordsSmart(item.name);
@@ -524,6 +531,7 @@ async function buildExtra(){
       await sleep(140);
     }
 
+    // 4) output js
     const out = Object.values(st.done).map(r => ({
       name: r.name,
       lat: r.lat,
@@ -537,11 +545,15 @@ async function buildExtra(){
 
     const elapsed = Math.round((Date.now()-start)/1000);
 
+    // NG sample
+    const ngNames = Object.keys(st.ng).slice(0, 12).map(k => k);
+
     setStatusHtml([
       `自動取得完了（対象セット: ${targets.map(setLabel).join(" / ")}）`,
       `OK: ${out.length} / NG: ${Object.keys(st.ng).length} / 合計ユニーク: ${total}`,
       `所要: ${elapsed}s`,
-      `※NGは GEO_OVERRIDES 追記で最小限だけ手動対応`
+      ngNames.length ? `NG例: ${ngNames.join(" / ")} ...` : "",
+      `※NGは mountaimSets.js の GEO_OVERRIDES に最小限だけ手動追記`
     ]);
 
     const content =
@@ -567,6 +579,17 @@ resetBtn.addEventListener("click", () => {
   exportHint.textContent = "進捗をリセットしました";
   setTimeout(() => { exportHint.style.display="none"; }, 2500);
 });
+clearWikiCacheBtn.addEventListener("click", () => {
+  try{
+    clearAllSetCaches();
+    exportHint.className = "chip";
+    exportHint.style.display = "inline-block";
+    exportHint.textContent = "山名キャッシュを削除しました（次回はfresh取得）";
+    setTimeout(() => { exportHint.style.display="none"; }, 3500);
+  }catch(e){
+    setStatusHtml([`キャッシュ削除エラー: ${String(e?.message || e)}`]);
+  }
+});
 
 /* ========= map ========= */
 const mapObj = L.map("map").setView([36.5, 138], 5);
@@ -579,17 +602,18 @@ L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png",
 
 const markerLayer = L.layerGroup().addTo(mapObj);
 
-// ★ 影画像も同じCDNで固定（unpkgjs.comに飛ばない）
+// Leaflet shadow 固定（unpkgjs.comへ行かない）
 const LEAFLET_SHADOW = "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/images/marker-shadow.png";
 
+// default / A/B/C
 const icon = color => L.icon({
   iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-${color}.png`,
   shadowUrl: LEAFLET_SHADOW,
   iconSize: [25,41],
   iconAnchor: [12,41]
 });
-const icons = { A:icon("green"), B:icon("yellow"), C:icon("red") };
-const scorePriority = { A:3, B:2, C:1 };
+const icons = { A:icon("green"), B:icon("yellow"), C:icon("red"), P:icon("grey") };
+const scorePriority = { A:3, B:2, C:1, P:0 };
 
 function getBestTime(weather, dateKey){
   const w = weather?.[dateKey];
@@ -606,6 +630,7 @@ function scoreCellClass(score){
   if (score === "A") return "a";
   if (score === "B") return "b";
   if (score === "C") return "c";
+  if (score === "P") return "p";
   return "";
 }
 function buildScoreGridHtml(m, selDay, selTime){
@@ -621,10 +646,10 @@ function buildScoreGridHtml(m, selDay, selTime){
   for (let d = 0; d <= 3; d++){
     const dk = getDateKey(d);
     const tds = timeSlots.map(t => {
-      const s = m.weather?.[dk]?.[t] ?? "-";
+      const s = m.weather?.[dk]?.[t] ?? "P";
       const base = scoreCellClass(s);
       const sel = (d===selDay && t===selTime) ? "sel" : "";
-      return `<td class="${base} ${sel}">${s ?? "-"}</td>`;
+      return `<td class="${base} ${sel}">${s}</td>`;
     }).join("");
     bodyRows.push(`<tr><th>${escapeHtml(dayLabel(d))}</th>${tds}</tr>`);
   }
@@ -634,7 +659,7 @@ function buildScoreGridHtml(m, selDay, selTime){
       ${head}
       <tbody>${bodyRows.join("")}</tbody>
     </table>
-    <small>※ 選択中の日付×時間は枠線で強調</small>
+    <small>※ 未取得は P（灰）</small>
   `;
 }
 function fmt(n, digits=1){
@@ -659,13 +684,13 @@ function detailHtml(m, selectedTime){
   const grid = buildScoreGridHtml(m, day, selectedTime);
 
   const rows = timeSlots.map((t, idx) => {
-    const s = m.weather?.[dateKey]?.[t] ?? "-";
+    const s = m.weather?.[dateKey]?.[t] ?? "P";
     const d = getDetail(m, dateKey, t);
     const cls = (t === selectedTime) ? "wx-current" : "";
     return `
       <tr class="${cls}">
         <td>${timeLabels[idx]}</td>
-        <td><b>${s ?? "-"}</b></td>
+        <td><b>${s}</b></td>
         <td>${d ? fmt(d.precipitation,1) : "-"}</td>
         <td>${d ? `${fmt(d.windspeed_mid,1)}→${fmt(d.windspeed_summit,1)}` : "-"}</td>
         <td>${d ? `${fmt(d.gust_mid,1)}→${fmt(d.gust_summit,1)}` : "-"}</td>
@@ -694,6 +719,7 @@ function detailHtml(m, selectedTime){
         </thead>
         <tbody>${rows}</tbody>
       </table>
+      <small>※ P は「天気未取得」。地図の表示範囲に入ると自動取得します。</small>
     </div>
   `;
 }
@@ -704,6 +730,9 @@ function openDetail(m, marker){
   detailOverlay.classList.add("show");
   detailOverlay.setAttribute("aria-hidden","false");
   document.body.style.overflow = "hidden";
+
+  // 詳細を開いた山は最優先で天気を取りに行く
+  ensureWeatherFor([m], { priority:true });
 }
 function closeDetail(){
   detailOverlay.classList.remove("show");
@@ -731,7 +760,9 @@ function upsertMountain(base){
       level: base.level ?? "中級",
       gpx: base.gpx ?? null,
       weather: base.weather ?? {},
-      _sets: sets
+      _sets: sets,
+      _wxPromise: null,
+      _wxOk: false
     });
   }else{
     const m = byName.get(key);
@@ -755,7 +786,7 @@ function addMarkerForMountain(m){
   if (!key || markerByKey.has(key)) return;
   if (m.lat == null || m.lng == null) return;
 
-  const marker = L.marker([m.lat, m.lng], { icon: icons["C"] });
+  const marker = L.marker([m.lat, m.lng], { icon: icons["P"] });
   marker.on("click", () => {
     mapObj.setView([m.lat, m.lng], Math.max(mapObj.getZoom(), 10));
     openDetail(m, marker);
@@ -773,7 +804,7 @@ function getState(){
   const goodOnly = document.getElementById("goodOnly").checked;
 
   const scores = [...document.querySelectorAll(
-    'input[value="A"]:checked,input[value="B"]:checked,input[value="C"]:checked'
+    'input[value="A"]:checked,input[value="B"]:checked,input[value="C"]:checked,input[value="P"]:checked'
   )].map(e => e.value);
 
   const levels = [...document.querySelectorAll(
@@ -844,7 +875,7 @@ function drawList(items, day){
 
   const target = isMobile() ? listBodyEl : listEl;
 
-  items.forEach(({ m, best, marker }) => {
+  items.forEach(({ m, best, marker, score }) => {
     const setPills = m._sets?.size
       ? [...m._sets].map(s => `<span class="setpill">${escapeHtml(setLabel(s))}</span>`).join("")
       : "";
@@ -852,10 +883,10 @@ function drawList(items, day){
     div.className = "list-item";
     div.innerHTML = `
       <b>${escapeHtml(m.name)}</b>
-      ${best?.score==="A" ? "<span class='star'>★</span>" : ""}
+      ${(score==="A") ? "<span class='star'>★</span>" : ""}
       ${setPills}
       <br>標高:${m.elev ?? "-"}m / ${escapeHtml(m.level)}<br>
-      ベスト:${best ? `${best.time}（${best.score}）` : "-"}
+      今:${score ?? "P"} / ベスト:${best ? `${best.time}（${best.score}）` : "-"}
     `;
     div.onclick = () => {
       if (isMobile()) setListCollapsed(true);
@@ -866,21 +897,72 @@ function drawList(items, day){
   });
 }
 
+/* ========= Weather on demand (範囲内だけ) ========= */
+function inBounds(m, bounds){
+  if (!bounds) return true;
+  return bounds.contains([m.lat, m.lng]);
+}
+
+function weatherScoreAt(m, dateKey, time){
+  const s = m.weather?.[dateKey]?.[time];
+  return s || "P";
+}
+
+async function ensureWeatherFor(mountains, { priority=false } = {}){
+  const need = mountains.filter(m => !m._wxOk && !m._wxPromise);
+  if (!need.length) return;
+
+  // tasks (priorityなら先頭を優先)
+  const ordered = priority ? [...need] : need;
+
+  const tasks = ordered.map(m => async () => {
+    m._wxPromise = (async () => {
+      const w = await generateWeatherScore(m.name, m.lat, m.lng, m.level, m.elev);
+      m.weather = w;
+      m._wxOk = true;
+      m._wxPromise = null;
+    })();
+    await m._wxPromise;
+  });
+
+  // 同時2本（429対策）
+  let last = 0;
+  await runWithConcurrency(tasks, 2, (done, total) => {
+    if (priority) return; // 優先時はステータスを荒らさない
+    if (done - last >= 6 || done === total){
+      last = done;
+      setStatusHtml([
+        `表示範囲の天気を取得中: ${done}/${total}（同時2本 / キャッシュあり）`,
+        `※地図を動かすと必要分だけ追加取得します`,
+      ]);
+    }
+  });
+
+  updateView();
+}
+
 /* update view */
+let lastBoundsSig = "";
 function updateView(){
   const { day, time, dateKey, goodOnly, scores, levels, sets } = getState();
-  const items = [];
+  const bounds = mapObj.getBounds();
 
+  const items = [];
   for (const entry of markerEntries){
     const m = entry.m;
     const marker = entry.marker;
 
-    const score = m.weather?.[dateKey]?.[time];
-    const pass =
-      !!score &&
-      scores.includes(score) &&
+    // set/level は天気無しでも判定できる
+    const prePass =
       levels.includes(m.level) &&
       mountainInSelectedSets(m, sets) &&
+      inBounds(m, bounds);
+
+    const score = prePass ? weatherScoreAt(m, dateKey, time) : "P";
+
+    const pass =
+      prePass &&
+      scores.includes(score) &&
       !(goodOnly && (score !== "A" || m.level === "上級"));
 
     if (pass){
@@ -888,8 +970,8 @@ function updateView(){
         markerLayer.addLayer(marker);
         entry.shown = true;
       }
-      marker.setIcon(icons[score]);
-      items.push({ m, best: getBestTime(m.weather, dateKey), marker });
+      marker.setIcon(icons[score] || icons["P"]);
+      items.push({ m, best: getBestTime(m.weather, dateKey), marker, score });
     }else{
       if (entry.shown){
         markerLayer.removeLayer(marker);
@@ -901,9 +983,26 @@ function updateView(){
 
   drawList(items, day);
 
+  // 詳細更新
   if (currentDetail?.mountain){
     detailTitle.textContent = currentDetail.mountain.name;
     detailBody.innerHTML = detailHtml(currentDetail.mountain, time);
+  }
+
+  // 範囲内の「必要な山」だけ天気を取りに行く
+  const sig = `${bounds.getSouthWest().lat.toFixed(2)},${bounds.getSouthWest().lng.toFixed(2)}:${bounds.getNorthEast().lat.toFixed(2)},${bounds.getNorthEast().lng.toFixed(2)}|${sets.join(",")}|${levels.join(",")}`;
+  if (sig !== lastBoundsSig){
+    lastBoundsSig = sig;
+    const visibleNeed = markerEntries
+      .map(e => e.m)
+      .filter(m =>
+        Number.isFinite(m.lat) && Number.isFinite(m.lng) &&
+        inBounds(m, bounds) &&
+        levels.includes(m.level) &&
+        mountainInSelectedSets(m, sets)
+      )
+      .slice(0, 60); // 一度に取りすぎない（体感・429対策）
+    ensureWeatherFor(visibleNeed);
   }
 
   setTimeout(() => mapObj.invalidateSize(), 60);
@@ -919,39 +1018,22 @@ async function init(){
 
   setStatusHtml([
     `固定データ統合: 合計${all.length}件 / 座標あり${geoOK.length}件`,
-    `天気は localStorage キャッシュ有（weather.js）`,
-    `初回ロードの429対策: 同時2本で取得`
+    `天気は「表示範囲だけ」取得（429/遅延対策）`,
+    `座標固定化は上のボタン（通常利用では走らない）`
   ]);
 
   for (const m of geoOK) addMarkerForMountain(m);
 
-  // weather.js 側に6時間キャッシュがある前提で、同時2本に制限
-  const tasks = geoOK.map(m => async () => {
-    if (m.weather && Object.keys(m.weather).length) return;
-    m.weather = await generateWeatherScore(m.name, m.lat, m.lng, m.level, m.elev);
-    // ちょい間を空けて優しく（体感はほぼ変わらず、429の発生率を下げる）
-    await sleep(40);
-  });
-
-  let last = 0;
-  await runWithConcurrency(tasks, 2, (done, total) => {
-    if (done - last >= 12 || done === total){
-      last = done;
-      setStatusHtml([
-        `固定データ統合: 合計${all.length}件 / 座標あり${geoOK.length}件`,
-        `天気取得: ${done}/${total}（同時2本 / キャッシュあり）`,
-        `※座標固定化は上のボタン（通常利用では走らない）`
-      ]);
-    }
-  });
-
+  // 変更で updateView
   document.querySelectorAll("#control input,#control select").forEach(e => {
-    if (e === daySelect) return;
     e.addEventListener("change", () => updateView());
   });
 
   initMobileListGestures();
   setListCollapsed(isMobile() ? true : false);
+
+  // 地図操作で updateView
+  mapObj.on("moveend zoomend", () => updateView());
 
   updateView();
 }
