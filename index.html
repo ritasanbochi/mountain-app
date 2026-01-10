@@ -1,908 +1,518 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8">
-  <link rel="icon" href="data:,">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>登山向け山岳マップ</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>登山向け山岳マップ</title>
 
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous">
-  <style>
-    body{ margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans JP", sans-serif; }
-    #control{
-      position:fixed; left:0; right:0; top:0;
-      z-index:3000;
-      background:#fff;
-      border-bottom:1px solid #ddd;
-      padding:10px 12px;
-      display:flex;
-      flex-wrap:wrap;
-      gap:10px 14px;
-      align-items:flex-end;
-    }
-    .group{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    .group b{ font-size:12px; color:#333; margin-right:4px; }
-    label{ font-size:12px; color:#222; display:inline-flex; align-items:center; gap:4px; }
-    select, input[type="range"]{ font-size:12px; }
-    #container{ position:fixed; left:0; right:0; top:76px; bottom:0; display:flex; }
-    #map{ flex:1; }
-    #list{
-      width:360px;
-      border-left:1px solid #ccc;
-      overflow:hidden;
-      background:#fff;
-      display:flex;
-      flex-direction:column;
-    }
-    #listBody{ overflow:auto; padding:10px 10px 14px; }
-    .row{
-      border:1px solid #e6e6e6;
-      border-radius:10px;
-      padding:8px 10px;
-      margin:8px 0;
-      cursor:pointer;
-      background:#fff;
-    }
-    .row:hover{ background:#fafafa; }
-    .row .top{ display:flex; justify-content:space-between; gap:10px; }
-    .row .name{ font-weight:700; }
-    .row .meta{ font-size:12px; color:#555; margin-top:4px; }
-    .pill{
-      display:inline-block;
-      padding:1px 7px;
-      border-radius:999px;
-      font-size:11px;
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<link rel="icon" href="data:,">
+
+<style>
+  body { margin:0; font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; }
+  #control{
+    padding:10px 12px;
+    background:#fff;
+    border-bottom:1px solid #ddd;
+    position:sticky; top:0; z-index:999;
+  }
+  #map { height: calc(100vh - 126px); }
+
+  .group { display:flex; flex-wrap:wrap; gap:10px 14px; align-items:center; margin:6px 0; }
+  .chip { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border:1px solid #ddd; border-radius:999px; background:#fafafa; }
+  .btn { padding:6px 10px; border:1px solid #ddd; background:#fff; border-radius:8px; cursor:pointer; }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .hr { height:1px; background:#eee; margin:8px 0; }
+
+  /* bottom list */
+  #listSheet{
+    position:fixed; left:0; right:0; bottom:0;
+    background:rgba(255,255,255,.98);
+    border-top:1px solid #ddd;
+    border-top-left-radius:14px;
+    border-top-right-radius:14px;
+    box-shadow: 0 -8px 24px rgba(0,0,0,.12);
+    max-height: 55vh;
+    display:flex; flex-direction:column;
+    z-index: 1200;
+  }
+  #sheetHeader{ padding:10px 12px; border-bottom:1px solid #eee; display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  #sheetHandle{ width:48px; height:5px; border-radius:999px; background:#ddd; margin:0 auto; }
+  #listBody{ overflow:auto; padding:8px 10px 12px; }
+  .row { display:flex; gap:10px; padding:10px 8px; border-bottom:1px solid #f0f0f0; cursor:pointer; }
+  .row:hover { background:#fafafa; }
+  .badge { width:28px; height:28px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-weight:800; border:1px solid transparent; }
+  .A { background:#e9f8ee; color:#117a2a; border-color:#bfe8c8; }
+  .B { background:#fff7e6; color:#9a6a00; border-color:#ffe0a8; }
+  .C { background:#ffe9ea; color:#a1151a; border-color:#ffc2c4; }
+  .N { background:#f3f4f6; color:#374151; border-color:#e5e7eb; }
+  .name { font-weight:800; }
+  .meta { font-size:12px; opacity:.75; }
+
+  /* overlay detail */
+  #overlay{
+    position:fixed; inset:0; display:none;
+    background:rgba(0,0,0,.35);
+    align-items:flex-end;
+    z-index: 2000;
+  }
+  #panel{
+    width:100%;
+    max-height: 75vh;
+    background:#fff;
+    border-top-left-radius:16px;
+    border-top-right-radius:16px;
+    box-shadow: 0 -10px 30px rgba(0,0,0,.2);
+    overflow:auto;
+  }
+  #panelHeader{
+    padding:12px 14px;
+    border-bottom:1px solid #eee;
+    display:flex; align-items:center; gap:10px;
+  }
+  #panelBody{ padding:12px 14px 18px; }
+  .kv { display:grid; grid-template-columns: 120px 1fr; gap: 8px 10px; font-size:14px; }
+  .kv div:nth-child(odd){ opacity:.7; }
+
+  #statusLine{
+    margin-top:6px;
+    font-size:12px;
+    color:#111;
+    white-space:pre-wrap;
+  }
+
+  @media (min-width: 900px){
+    #map { height: calc(100vh - 116px); }
+    #listSheet{
+      left:10px; right:auto; bottom:10px;
+      width:420px;
+      max-height: calc(100vh - 140px);
       border:1px solid #ddd;
-      background:#f7f7f7;
-      margin-left:6px;
-      color:#333;
-    }
-    .setpill{
-      display:inline-block;
-      padding:1px 7px;
-      border-radius:999px;
-      font-size:11px;
-      border:1px solid #d8d8d8;
-      background:#f6f6f6;
-      margin-left:6px;
-      color:#333;
-    }
-
-    /* detail overlay */
-    #detailOverlay{
-      position:fixed;
-      inset:0;
-      z-index:4000;
-      background:rgba(0,0,0,0.35);
-      display:none;
-      align-items:center;
-      justify-content:center;
-      padding:14px;
-    }
-    #detailOverlay.show{ display:flex; }
-    #detailPanel{
-      width:min(760px, 96vw);
-      max-height:86vh;
-      overflow:auto;
-      background:#fff;
       border-radius:14px;
-      box-shadow:0 12px 40px rgba(0,0,0,0.22);
     }
-    #detailHeader{
-      position:sticky; top:0;
-      background:#fff;
-      border-bottom:1px solid #eee;
-      padding:10px 12px;
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      gap:10px;
-    }
-    #detailTitle{ font-size:14px; }
-    #detailClose{ padding:6px 10px; font-size:12px; }
-
-    #detailBody{ padding:12px; font-size:13px; line-height:1.55; }
-
-    .meta-box{
-      border:1px solid #eee;
-      border-radius:10px;
-      padding:10px 10px;
-      background:#fbfbfb;
-      margin-top:10px;
-    }
-    .meta-line{ display:flex; justify-content:space-between; gap:10px; margin:4px 0; }
-    .badge{ padding:1px 8px; border-radius:999px; font-size:11px; border:1px solid #ddd; }
-    .badge-api{ background:#eaf7ee; border-color:#cfe9d7; }
-    .badge-dummy{ background:#ffe7e7; border-color:#ffd0d0; }
-    .meta-warn{ color:#b00020; font-weight:700; }
-
-    .wx-table{
-      width:100%;
-      border-collapse:collapse;
-      font-size:12px;
-    }
-    .wx-table th, .wx-table td{
-      border:1px solid #ddd;
-      padding:4px 6px;
-      text-align:center;
-    }
-    .wx-table th{ background:#f7f7f7; font-weight:600; }
-    .wx-current{ background:#eef6ff; font-weight:700; }
-
-    .score-grid{
-      width:100%;
-      border-collapse:collapse;
-      font-size:12px;
-    }
-    .score-grid td, .score-grid th{
-      border:1px solid #ddd;
-      padding:4px 0;
-      text-align:center;
-    }
-    .score-grid th{ background:#f7f7f7; font-weight:600; }
-    .score-grid .sel{
-      outline:2px solid #5aa7ff;
-      outline-offset:-2px;
-      font-weight:800;
-      background:#eef6ff;
-    }
-    .score-grid .a{ background:#eaf7ee; }
-    .score-grid .b{ background:#fff7db; }
-    .score-grid .c{ background:#ffe7e7; }
-
-    /* mobile bottom sheet */
-    #listHeader{ display:none; }
-    #listTab{ display:none; }
-
-    @media (max-width:768px){
-      #container{ top:100px; }
-      #list{
-        position:fixed;
-        left:0; right:0;
-        bottom:0; top:auto;
-        width:100%;
-        height:45vh;
-        border-left:none;
-        border-top:1px solid #ccc;
-        border-radius:14px 14px 0 0;
-        box-shadow: 0 -6px 18px rgba(0,0,0,0.08);
-        overflow:hidden;
-        z-index:2000;
-        transform: translateY(0);
-        transition: transform 220ms ease;
-        touch-action: pan-y;
-        background:#fff;
-      }
-      #list.is-collapsed{ transform: translateY(100%); }
-
-      #listHeader{
-        display:flex;
-        align-items:center;
-        justify-content:space-between;
-        gap:10px;
-        padding:10px 12px;
-        background:#fff;
-        border-bottom:1px solid #eee;
-        user-select:none;
-      }
-      #listHeader .title{ font-weight:700; font-size:14px; }
-      #listHeader .grip{
-        width:42px; height:5px;
-        border-radius:999px;
-        background:#d8d8d8;
-        margin:0 10px;
-      }
-      #listHeader .hint{ font-size:12px; color:#666; white-space:nowrap; }
-
-      #listTab{
-        display:block;
-        position:fixed;
-        left:12px;
-        bottom:14px;
-        z-index:2500;
-        padding:10px 12px;
-        border-radius:999px;
-        border:1px solid #ddd;
-        background:#fff;
-        box-shadow:0 8px 22px rgba(0,0,0,0.14);
-        font-size:13px;
-      }
-      #listTab.hidden{ display:none; }
-    }
-  </style>
+  }
+</style>
 </head>
-<body>
 
+<body>
 <div id="control">
   <div class="group">
-    <b>日付</b>
-    <select id="day">
+    <b>表示セット</b>
+    <label class="chip"><input type="checkbox" class="setChk" value="HYAKU" checked>百名山</label>
+    <label class="chip"><input type="checkbox" class="setChk" value="HANA_100">花の百名山</label>
+    <label class="chip"><input type="checkbox" class="setChk" value="NIHON_200">二百名山</label>
+    <label class="chip"><input type="checkbox" class="setChk" value="NIHON_300">三百名山</label>
+  </div>
+
+  <div class="group">
+    <b>難易度</b>
+    <label class="chip"><input type="checkbox" value="初級" checked>初級</label>
+    <label class="chip"><input type="checkbox" value="中級" checked>中級</label>
+    <label class="chip"><input type="checkbox" value="上級" checked>上級</label>
+    <label class="chip" style="margin-left:6px;"><input type="checkbox" id="goodOnly"> 登れる山だけ</label>
+  </div>
+
+  <div class="hr"></div>
+
+  <div class="group">
+    <b>天気</b>
+    <select id="day" class="btn">
       <option value="0">今日</option>
       <option value="1">+1日</option>
       <option value="2">+2日</option>
       <option value="3">+3日</option>
     </select>
+
+    <input id="timeSlider" type="range" min="0" max="5" step="1" value="0" style="flex:1; min-width:160px;">
+    <span class="chip" id="timeLabel">06:00</span>
+
+    <button class="btn" id="listTab" type="button">山リスト</button>
+    <button class="btn" id="toJapan" type="button">日本全体</button>
   </div>
 
-  <div class="group">
-    <b>時間帯</b>
-    <input id="timeSlider" type="range" min="0" max="5" step="1" value="0">
-    <span id="timeLabel" class="pill">06–08</span>
-  </div>
-
-  <div class="group">
-    <b>山セット</b>
-    <label><input type="checkbox" class="setChk" value="HYAKU" checked>百名山</label>
-    <label><input type="checkbox" class="setChk" value="HANA_100">花の百名山</label>
-    <label><input type="checkbox" class="setChk" value="NIHON_200">二百名山</label>
-    <label><input type="checkbox" class="setChk" value="NIHON_300">三百名山</label>
-  </div>
-
-  <div class="group">
-    <b>天気</b>
-    <label><input type="checkbox" value="A" checked>A</label>
-    <label><input type="checkbox" value="B" checked>B</label>
-    <label><input type="checkbox" value="C" checked>C</label>
-    <label><input type="checkbox" value="P" checked>未取得</label>
-  </div>
-
-  <div class="group">
-    <b>難易度</b>
-    <label><input type="checkbox" value="初級" checked>初級</label>
-    <label><input type="checkbox" value="中級" checked>中級</label>
-    <label><input type="checkbox" value="上級" checked>上級</label>
-    <label style="margin-left:6px;"><input type="checkbox" id="goodOnly"> 登れる山だけ</label>
-  </div>
-
-  <div class="group">
-    <span id="setStatus" style="font-size:12px;color:#444; max-width: 78vw;"></span>
-  </div>
+  <div id="statusLine"></div>
 </div>
 
-<div id="container">
-  <div id="map"></div>
-  <div id="list">
-    <div id="listHeader">
-      <div style="display:flex; align-items:center; gap:10px;">
-        <div class="grip" aria-hidden="true"></div>
-        <div class="title">山リスト</div>
+<div id="map"></div>
+
+<!-- bottom list -->
+<div id="listSheet">
+  <div id="sheetHeader">
+    <div style="width:100%;">
+      <div id="sheetHandle"></div>
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-top:8px;">
+        <div>
+          <div style="font-weight:900;">山リスト</div>
+          <div class="meta" id="countLine">表示: 0</div>
+        </div>
+        <button class="btn" id="closeList" type="button">閉じる</button>
       </div>
-      <div class="hint">下へスワイプ / タップで隠す</div>
     </div>
-    <div id="listBody"></div>
+  </div>
+  <div id="listBody"></div>
+</div>
+
+<!-- overlay -->
+<div id="overlay">
+  <div id="panel">
+    <div id="panelHeader">
+      <div class="badge N" id="ovBadge">…</div>
+      <div>
+        <div class="name" id="ovName">---</div>
+        <div class="meta" id="ovMeta">---</div>
+      </div>
+      <button class="btn" id="detailClose" type="button" style="margin-left:auto;">閉じる</button>
+    </div>
+    <div id="panelBody">
+      <div class="kv" id="ovKv"></div>
+    </div>
   </div>
 </div>
 
-<button id="listTab" class="hidden" type="button">山リスト</button>
-
-<div id="detailOverlay" aria-hidden="true">
-  <div id="detailPanel" role="dialog" aria-modal="true" aria-label="山の詳細">
-    <div id="detailHeader">
-      <b id="detailTitle">山の詳細</b>
-      <button id="detailClose" type="button">閉じる</button>
-    </div>
-    <div id="detailBody"></div>
-  </div>
-</div>
-
-<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
 <script type="module">
 import mountains from "./mountains.js";
 import mountainsExtra from "./mountains_extra.js";
 import { generateWeatherScore } from "./weather.js";
-import { GEO_OVERRIDES, SET_DEFS } from "./mountaimSets.js";
 
 /* ========= utilities ========= */
 const timeSlots  = ["06:00","08:00","10:00","12:00","14:00","16:00"];
-const timeLabels = ["06–08","08–10","10–12","12–14","14–16","16–18"];
+const timeSlots2 = ["06–08","08–10","10–12","12–14","14–16","16–18"];
 const slider = document.getElementById("timeSlider");
 const timeLabel = document.getElementById("timeLabel");
 const daySelect = document.getElementById("day");
-const setStatus = document.getElementById("setStatus");
+const statusLine = document.getElementById("statusLine");
 
-function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+const SET_LABELS = { HYAKU:"百名山", HANA_100:"花の百名山", NIHON_200:"二百名山", NIHON_300:"三百名山" };
+function setLabel(k){ return SET_LABELS[k] || k; }
 
-function escapeHtml(s){
-  return String(s ?? "").replace(/[&<>"']/g, c => ({
-    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
-  }[c]));
-}
-function normName(name){
-  return String(name ?? "").trim().replace(/\s+/g,"").replace(/[（(].*?[）)]/g,"");
-}
-function isMobile(){ return window.matchMedia("(max-width: 768px)").matches; }
-
-function setStatusHtml(lines){
-  setStatus.innerHTML = (lines || []).map(s => `<div>${escapeHtml(s)}</div>`).join("");
+function normName(s){
+  return String(s ?? "").trim().replace(/\s+/g,"").replace(/[（(].*?[）)]/g,"");
 }
 
-/* date labels */
-function dayLabel(offset){
-  const d = new Date();
-  d.setDate(d.getDate() + offset);
-  const pad = n => String(n).padStart(2,"0");
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
-}
-function getDateKey(offset){
-  const d = new Date();
-  d.setHours(0,0,0,0);
-  d.setDate(d.getDate() + offset);
-  const pad = n => String(n).padStart(2,"0");
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
-}
-function initDaySelectLabels(){
-  [...daySelect.options].forEach(opt => opt.textContent = dayLabel(Number(opt.value)));
+function badgeClass(score){
+  if (score === "A") return "A";
+  if (score === "B") return "B";
+  if (score === "C") return "C";
+  return "N";
 }
 
-/* time slider */
-function sliderIndex(){ return Number(slider.value); }
-function setSliderIndex(i){ slider.value = String(i); updateTimeLabel(); }
-function updateTimeLabel(){
-  timeLabel.textContent = timeLabels[sliderIndex()] ?? "-";
-}
-slider.addEventListener("input", () => updateTimeLabel());
+/* ========= 429対策：同時実行制限 ========= */
+async function runWithConcurrency(tasks, concurrency, onProgress){
+  let idx = 0, active = 0, done = 0;
+  const results = new Array(tasks.length);
 
-function nearestTimeSlotIndexNow(){
-  const h = new Date().getHours();
-  // 06,08,10,12,14,16 を基準に近い枠へ
-  const centers = [7,9,11,13,15,17];
-  let best=0, bestDiff=999;
-  for (let i=0;i<centers.length;i++){
-    const diff = Math.abs(centers[i]-h);
-    if (diff < bestDiff){ best=i; bestDiff=diff; }
-  }
-  return best;
-}
-function getSelectedTime(){
-  return timeSlots[sliderIndex()] || timeSlots[0];
-}
-
-/* score priority */
-const scorePriority = { "A":3, "B":2, "C":1, "P":0 };
-
-/* map */
-const mapObj = L.map("map", { zoomControl:true }).setView([36.2, 138.2], 6);
-const tileStd = L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png", {
-  attribution:'&copy; <a href="https://www.gsi.go.jp/">GSI</a>',
-  maxZoom:18
-}).addTo(mapObj);
-const tileRelief = L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/relief/{z}/{x}/{y}.png", {
-  attribution:'&copy; <a href="https://www.gsi.go.jp/">GSI</a>',
-  maxZoom:18,
-  opacity:0.45
-}).addTo(mapObj);
-
-const markerLayer = L.layerGroup().addTo(mapObj);
-
-/* marker icons */
-const LEAFLET_SHADOW = "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/images/marker-shadow.png";
-function iconByColor(color){
-  return new L.Icon({
-    iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-${color}.png`,
-    shadowUrl: LEAFLET_SHADOW,
-    iconSize: [25,41],
-    iconAnchor: [12,41],
-    popupAnchor: [1,-34],
-    shadowSize: [41,41]
+  return new Promise((resolve, reject) => {
+    const next = () => {
+      if (done === tasks.length) return resolve(results);
+      while (active < concurrency && idx < tasks.length){
+        const cur = idx++;
+        active++;
+        Promise.resolve()
+          .then(() => tasks[cur]())
+          .then(res => { results[cur] = res; })
+          .catch(err => { results[cur] = { __error: err }; })
+          .finally(() => {
+            active--;
+            done++;
+            onProgress?.(done, tasks.length);
+            next();
+          });
+      }
+    };
+    next();
   });
 }
-const icons = {
-  A: iconByColor("green"),
-  B: iconByColor("orange"),
-  C: iconByColor("red"),
-  P: iconByColor("blue"),
-};
 
-/* detail overlay */
-const detailOverlay = document.getElementById("detailOverlay");
-const detailTitle = document.getElementById("detailTitle");
-const detailBody = document.getElementById("detailBody");
-const detailClose = document.getElementById("detailClose");
-let currentDetail = null;
+/* ========= map ========= */
+const map = L.map("map", { zoomControl: true }).setView([36.2, 138.2], 6);
 
-function safeDate(iso){
-  try{
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return null;
-    return d;
-  }catch{ return null; }
-}
-function fmtJpDateTime(iso){
-  const d = safeDate(iso);
-  if (!d) return "-";
-  const pad = (n) => String(n).padStart(2,"0");
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-function timeAgo(iso){
-  const d = safeDate(iso);
-  if (!d) return "-";
-  const diff = Date.now() - d.getTime();
-  if (diff < 0) return "未来";
-  const min = Math.floor(diff / 60000);
-  if (min < 1) return "たった今";
-  if (min < 60) return `${min}分前`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `${h}時間前`;
-  const day = Math.floor(h / 24);
-  return `${day}日前`;
-}
-function buildMetaBox(m){
-  const meta = m.weather?._meta || {};
-  const source = meta.source === "api" ? "API" : "DUMMY";
-  const badgeClass = meta.source === "api" ? "badge-api" : "badge-dummy";
-  const fetched = fmtJpDateTime(meta.fetchedAt);
-  const ago = timeAgo(meta.fetchedAt);
-  const lat = (meta.lat ?? m.lat);
-  const lng = (meta.lng ?? m.lng);
-  const reason = meta.source === "dummy" && meta.reason ? meta.reason : null;
+L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png", {
+  maxZoom: 18,
+  attribution: "地理院タイル"
+}).addTo(map);
 
-  const elevApi = (meta.elevation_api ?? null);
-  const elevMid = (meta.elevation_mid ?? null);
-  const elevSummit = (meta.elevation_summit ?? m.elev ?? null);
+L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/hillshademap/{z}/{x}/{y}.png", {
+  maxZoom: 16,
+  opacity: 0.35,
+  attribution: "地理院陰影"
+}).addTo(map);
 
-  return `
-    <div class="meta-box">
-      <div class="meta-line">
-        <span>データ元</span>
-        <span><span class="badge ${badgeClass}">${source}</span></span>
-      </div>
-      <div class="meta-line">
-        <span>取得時刻</span>
-        <span>${fetched}（${ago}）</span>
-      </div>
-      <div class="meta-line">
-        <span>座標</span>
-        <span>${Number(lat).toFixed(3)}, ${Number(lng).toFixed(3)}</span>
-      </div>
-      <div class="meta-line">
-        <span>標高</span>
-        <span>API:${elevApi ?? "-"}m / 中腹:${elevMid ?? "-"}m / 山頂:${elevSummit ?? "-" }m</span>
-      </div>
-      ${reason ? `<div class="meta-line"><span class="meta-warn">取得失敗</span><span class="meta-warn">${escapeHtml(reason)}</span></div>` : ""}
-      <small>※ DUMMY はAPI取得失敗時の仮データです</small>
-    </div>
-  `;
-}
+/* ========= data merge ========= */
+function mergeAll(){
+  const byId = new Map();
 
-/* score grid */
-function scoreCellClass(score){
-  if (score === "A") return "a";
-  if (score === "B") return "b";
-  if (score === "C") return "c";
-  return "";
-}
-function buildScoreGridHtml(m, selDay, selTime){
-  const head = `
-    <thead>
-      <tr>
-        <th style="width:18%"></th>
-        ${timeLabels.map(l => `<th>${l}</th>`).join("")}
-      </tr>
-    </thead>
-  `;
-  const bodyRows = [];
-  for (let d = 0; d <= 3; d++){
-    const dk = getDateKey(d);
-    const tds = timeSlots.map(t => {
-      const s = m.weather?.[dk]?.[t] ?? "-";
-      const base = scoreCellClass(s);
-      const sel = (d === selDay && t === selTime) ? "sel" : "";
-      return `<td class="${base} ${sel}">${s ?? "-"}</td>`;
-    }).join("");
-    bodyRows.push(`<tr><th>${escapeHtml(dayLabel(d))}</th>${tds}</tr>`);
-  }
-  return `
-    <b>スコア早見表（今日〜3日後 × 全時間帯）</b><br>
-    <table class="score-grid">
-      ${head}
-      <tbody>${bodyRows.join("")}</tbody>
-    </table>
-    <small>※ 選択中の日付×時間は枠線で強調</small>
-  `;
-}
-
-/* best time */
-function getBestTime(weather, dateKey){
-  const w = weather?.[dateKey];
-  if (!w) return null;
-  let best = null;
-  for (const t of timeSlots) {
-    const s = w[t];
-    if (!s) continue;
-    if (!best || scorePriority[s] > scorePriority[best.score]) best = { time:t, score:s };
-  }
-  return best;
-}
-
-function setLabel(k){
-  return SET_DEFS?.[k]?.label ?? k;
-}
-
-function detailHtml(m, time){
-  const { day } = getState();
-  const dateKey = getDateKey(day);
-
-  const grid = buildScoreGridHtml(m, day, time);
-
-  const rows = timeSlots.map(t => {
-    const s = m.weather?.[dateKey]?.[t] ?? "P";
-    const d = m.weather?._detail?.[dateKey]?.[t] || {};
-    const cls = (t === time) ? "wx-current" : "";
-    return `
-      <tr class="${cls}">
-        <td>${t}</td>
-        <td><b>${s}</b></td>
-        <td>${d.precip ?? "-"}</td>
-        <td>${d.wind ?? "-"}</td>
-        <td>${d.gust ?? "-"}</td>
-        <td>${d.temp ?? "-"}</td>
-      </tr>
-    `;
-  }).join("");
-
-  const setPills = m._sets?.size
-    ? [...m._sets].map(s => `<span class="setpill">${escapeHtml(setLabel(s))}</span>`).join("")
-    : "";
-
-  return `
-    <div>
-      <b>${escapeHtml(m.name)}</b>${setPills}<br>
-      標高：${m.elev ?? "-"} m / 難易度：${escapeHtml(m.level)}<br>
-      <small>座標: ${m.lat?.toFixed?.(5) ?? "-"}, ${m.lng?.toFixed?.(5) ?? "-"}</small>
-      <hr>${grid}
-      <hr>
-      <b>${escapeHtml(dayLabel(day))} の根拠（時間帯別）</b><br>
-      <table class="wx-table">
-        <thead>
-          <tr>
-            <th>時間</th><th>スコア</th><th>降水(mm)</th><th>風(m/s)</th><th>突風(m/s)</th><th>気温(℃)</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-      <hr>
-      ${buildMetaBox(m)}
-      <small>※ P は「天気未取得」。表示範囲に入ると自動取得します。</small>
-    </div>
-  `;
-}
-
-function openDetail(m, marker){
-  currentDetail = { mountain: m, marker };
-  detailTitle.textContent = m.name;
-  detailBody.innerHTML = detailHtml(m, getSelectedTime());
-  detailOverlay.classList.add("show");
-  detailOverlay.setAttribute("aria-hidden","false");
-  document.body.style.overflow = "hidden";
-
-  // 詳細を開いた山は最優先で天気を取りに行く
-  ensureWeatherFor([m], { priority:true });
-}
-function closeDetail(){
-  detailOverlay.classList.remove("show");
-  detailOverlay.setAttribute("aria-hidden","true");
-  detailBody.innerHTML = "";
-  document.body.style.overflow = "";
-  currentDetail = null;
-}
-detailClose.onclick = closeDetail;
-detailOverlay.addEventListener("click", (e) => { if (e.target === detailOverlay) closeDetail(); });
-window.addEventListener("keydown", (e) => { if (e.key === "Escape" && detailOverlay.classList.contains("show")) closeDetail(); });
-
-/* merge mountains (fixed coords only) */
-const byName = new Map();
-function upsertMountain(base){
-  const key = normName(base.name);
-  if (!key) return null;
-
-  // overrides
-  const ov = GEO_OVERRIDES?.[base.name];
-  if (ov?.lat != null && ov?.lng != null){
-    base = { ...base, lat:Number(ov.lat), lng:Number(ov.lng), elev:(ov.elev==null?base.elev:Number(ov.elev)) };
-  }
-
-  const sets = new Set(base._sets ?? []);
-  if (!byName.has(key)){
-    byName.set(key, {
-      name: base.name,
-      lat: base.lat ?? null,
-      lng: base.lng ?? null,
-      elev: base.elev ?? null,
-      level: base.level ?? "中級",
-      gpx: base.gpx ?? null,
-      weather: base.weather ?? {},
-      _sets: sets,
-      _wxPromise: null,
-      _wxOk: false
+  for (const m of mountains){
+    // mountains.js 側は id/name/lat/lng/elev/level を前提（lat/lng が違う場合は下の方で調整）
+    const lat = (m.lat ?? m.latitude);
+    const lng = (m.lng ?? m.lon ?? m.longitude);
+    byId.set(m.id, {
+      ...m,
+      lat, lng,
+      elev: m.elev ?? m.elevation,
+      level: m.level ?? "中級",
+      _sets: Array.isArray(m._sets) ? m._sets.slice() : ["HYAKU"]
     });
-  }else{
-    const m = byName.get(key);
-    if (m.lat == null && base.lat != null) m.lat = base.lat;
-    if (m.lng == null && base.lng != null) m.lng = base.lng;
-    if (m.elev == null && base.elev != null) m.elev = base.elev;
-    if (!m.level && base.level) m.level = base.level;
-    if (!m.gpx && base.gpx) m.gpx = base.gpx;
-    sets.forEach(s => m._sets.add(s));
   }
-  return byName.get(key);
+
+  for (const m of mountainsExtra){
+    const lat = (m.lat ?? m.latitude);
+    const lng = (m.lng ?? m.lon ?? m.longitude);
+    const obj = {
+      ...m,
+      lat, lng,
+      elev: m.elev ?? m.elevation,
+      level: m.level ?? "中級",
+      _sets: Array.isArray(m._sets) ? m._sets.slice() : []
+    };
+    const prev = byId.get(m.id);
+    if (prev){
+      const set = new Set([...(prev._sets||[]), ...(obj._sets||[])]);
+      byId.set(m.id, { ...prev, ...obj, _sets:[...set] });
+    } else {
+      byId.set(m.id, obj);
+    }
+  }
+
+  return [...byId.values()];
 }
-mountains.forEach(m => upsertMountain({ ...m, _sets:["HYAKU"] }));
-(mountainsExtra || []).forEach(m => upsertMountain({ ...m, _sets:Array.isArray(m._sets) ? m._sets : [] }));
 
-/* markers */
-const markerEntries = [];
-const markerByKey = new Map();
-function addMarkerForMountain(m){
-  const key = normName(m.name);
-  if (!key || markerByKey.has(key)) return;
-  if (m.lat == null || m.lng == null) return;
+let ALL = mergeAll();
 
-  const marker = L.marker([m.lat, m.lng], { icon: icons["P"] });
-  marker.on("click", () => {
-    mapObj.setView([m.lat, m.lng], Math.max(mapObj.getZoom(), 10));
-    openDetail(m, marker);
-  });
+/* ========= markers ========= */
+const markerLayer = L.layerGroup().addTo(map);
+const markerMap = new Map(); // id -> marker
 
-  markerEntries.push({ m, marker, shown:false });
-  markerByKey.set(key, marker);
+function selectedSetKeys(){
+  return [...document.querySelectorAll(".setChk:checked")].map(e => e.value);
+}
+function selectedLevels(){
+  return [...document.querySelectorAll('#control input[type="checkbox"]')]
+    .filter(e => ["初級","中級","上級"].includes(e.value) && e.checked)
+    .map(e => e.value);
 }
 
-/* filters */
-function getState(){
-  const day = Number(daySelect.value);
-  const time = getSelectedTime();
-  const dateKey = getDateKey(day);
+function filterMountains(){
+  const setKeys = new Set(selectedSetKeys());
+  const lv = new Set(selectedLevels());
   const goodOnly = document.getElementById("goodOnly").checked;
 
-  const scores = [...document.querySelectorAll(
-    'input[value="A"]:checked,input[value="B"]:checked,input[value="C"]:checked,input[value="P"]:checked'
-  )].map(e => e.value);
-
-  const levels = [...document.querySelectorAll(
-    'input[value="初級"]:checked,input[value="中級"]:checked,input[value="上級"]:checked'
-  )].map(e => e.value);
-
-  const sets = [...document.querySelectorAll('.setChk:checked')].map(e => e.value);
-  return { day, time, dateKey, goodOnly, scores, levels, sets };
-}
-function mountainInSelectedSets(m, sets){
-  if (!sets?.length) return true;
-  const ms = m._sets;
-  if (!ms || ms.size === 0) return false;
-  for (const s of sets) if (ms.has(s)) return true;
-  return false;
-}
-
-/* list + mobile sheet */
-const list = document.getElementById("list");
-const listBody = document.getElementById("listBody");
-const listHeader = document.getElementById("listHeader");
-const listTab = document.getElementById("listTab");
-
-function setListCollapsed(collapsed){
-  if (!isMobile()) return;
-  list.classList.toggle("is-collapsed", collapsed);
-  listTab.classList.toggle("hidden", !collapsed);
-}
-function initMobileListGestures(){
-  if (!isMobile()) return;
-  listHeader.addEventListener("click", () => setListCollapsed(true));
-  listTab.addEventListener("click", () => setListCollapsed(false));
-
-  let startY=0, curY=0, dragging=false;
-  listHeader.addEventListener("touchstart", (e) => {
-    dragging=true;
-    startY=e.touches[0].clientY;
-    curY=startY;
-  }, { passive:true });
-  listHeader.addEventListener("touchmove", (e) => {
-    if (!dragging) return;
-    curY=e.touches[0].clientY;
-  }, { passive:true });
-  listHeader.addEventListener("touchend", () => {
-    if (!dragging) return;
-    dragging=false;
-    if (curY - startY > 35) setListCollapsed(true);
+  return ALL.filter(m => {
+    const lat = Number(m.lat), lng = Number(m.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+    if (lv.size && !lv.has(m.level)) return false;
+    if (setKeys.size && !(m._sets || []).some(s => setKeys.has(s))) return false;
+    if (goodOnly && m.weather?.score && m.weather.score !== "A") return false;
+    return true;
   });
 }
 
-function drawList(items, day){
-  const rows = items.map(x => {
-    const m = x.m;
-    const score = x.score;
-    const best = x.best ? `${x.best.time}（${x.best.score}）` : "-";
-    const setPills = m._sets?.size
-      ? [...m._sets].map(s => `<span class="setpill">${escapeHtml(setLabel(s))}</span>`).join("")
-      : "";
-    return `
-      <div class="row" data-name="${escapeHtml(m.name)}">
-        <div class="top">
-          <div class="name">${escapeHtml(m.name)}${setPills}</div>
-          <div><span class="pill">${score}</span></div>
-        </div>
-        <div class="meta">
-          標高:${m.elev ?? "-"}m / 難易度:${escapeHtml(m.level)} / ベスト:${best}
-        </div>
+function clearMarkers(){
+  markerLayer.clearLayers();
+  markerMap.clear();
+}
+
+function addMarkerForMountain(m){
+  const marker = L.marker([m.lat, m.lng]);
+  marker.on("click", () => openDetail(m));
+  marker.addTo(markerLayer);
+  markerMap.set(m.id, marker);
+}
+
+function repaintMarker(m){
+  // Leaflet標準アイコンは色変更しづらいので、簡易に “ポップアップ/リスト側” を主にする
+  // ここでは何もしない（既存挙動を壊さない）
+}
+
+/* ========= list + detail ========= */
+const listSheet = document.getElementById("listSheet");
+const listBody = document.getElementById("listBody");
+const countLine = document.getElementById("countLine");
+
+const overlay = document.getElementById("overlay");
+const ovBadge = document.getElementById("ovBadge");
+const ovName = document.getElementById("ovName");
+const ovMeta = document.getElementById("ovMeta");
+const ovKv = document.getElementById("ovKv");
+
+document.getElementById("detailClose").onclick = () => overlay.style.display = "none";
+overlay.onclick = (e) => { if (e.target === overlay) overlay.style.display = "none"; };
+
+document.getElementById("listTab").onclick = () => {
+  listSheet.style.display = (listSheet.style.display === "none") ? "flex" : "none";
+};
+document.getElementById("closeList").onclick = () => listSheet.style.display = "none";
+
+document.getElementById("toJapan").onclick = () => map.setView([36.2, 138.2], 6);
+
+function openDetail(m){
+  overlay.style.display = "flex";
+
+  const score = m.weather?.score ?? "…";
+  ovBadge.className = "badge " + badgeClass(score);
+  ovBadge.textContent = score;
+
+  ovName.textContent = m.name;
+  ovMeta.textContent = `${Math.round(m.elev||0)}m / ${(m._sets||[]).map(setLabel).join(",")} / ${Number(m.lat).toFixed(5)}, ${Number(m.lng).toFixed(5)}`;
+
+  ovKv.innerHTML = "";
+  const add = (k,v) => {
+    const a=document.createElement("div"); a.textContent = k;
+    const b=document.createElement("div"); b.textContent = v;
+    ovKv.appendChild(a); ovKv.appendChild(b);
+  };
+
+  if (m.weather?.detail){
+    add("降水", m.weather.detail.precip ?? "-");
+    add("風速", m.weather.detail.wind ?? "-");
+    add("突風", m.weather.detail.gust ?? "-");
+    add("気温", m.weather.detail.temp ?? "-");
+    add("根拠", m.weather.detail.reason ?? "-");
+    add("データ元", m.weather.detail.source ?? "-");
+    add("取得時刻", m.weather.detail.fetchedAt ?? "-");
+  } else {
+    add("天気", "未取得（自動取得中）");
+  }
+}
+
+function renderList(items){
+  listBody.innerHTML = "";
+
+  // 画面内優先 → なければ全件
+  const bounds = map.getBounds();
+  const inView = items.filter(m => bounds.contains([m.lat, m.lng]));
+  const target = inView.length ? inView : items;
+
+  target.sort((a,b) => (b.elev||0) - (a.elev||0));
+
+  for (const m of target){
+    const score = m.weather?.score ?? "…";
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `
+      <div class="badge ${badgeClass(score)}">${score}</div>
+      <div style="min-width:0;">
+        <div class="name">${m.name}</div>
+        <div class="meta">${Math.round(m.elev||0)}m / ${(m._sets||[]).map(setLabel).join(",")}</div>
       </div>
     `;
-  }).join("");
+    row.onclick = () => {
+      map.setView([m.lat, m.lng], Math.max(map.getZoom(), 11));
+      openDetail(m);
+    };
+    listBody.appendChild(row);
+  }
 
-  listBody.innerHTML = rows || `<div style="color:#666; font-size:13px; padding:8px;">該当なし</div>`;
-
-  [...listBody.querySelectorAll(".row")].forEach(el => {
-    el.addEventListener("click", () => {
-      const name = el.getAttribute("data-name");
-      const key = normName(name);
-      const entry = markerEntries.find(e => normName(e.m.name) === key);
-      if (!entry) return;
-      mapObj.setView([entry.m.lat, entry.m.lng], Math.max(mapObj.getZoom(), 10));
-      openDetail(entry.m, entry.marker);
-    });
-  });
+  countLine.textContent = `表示: ${items.length} / 画面内: ${inView.length}`;
 }
 
-/* concurrency helper */
-async function runWithConcurrency(tasks, concurrency, onProgress){
-  let i = 0;
-  let done = 0;
-  const total = tasks.length;
-  const workers = new Array(concurrency).fill(0).map(async () => {
-    while (true){
-      const idx = i++;
-      if (idx >= total) break;
-      await tasks[idx]();
-      done++;
-      if (onProgress) onProgress(done, total);
-      await sleep(120); // わずかに間隔（429軽減）
+/* ========= weather auto fetch ========= */
+function setStatus(lines){
+  statusLine.textContent = (lines || []).join("\n");
+}
+
+async function autoFetchWeather(mountains){
+  // まだ未取得のものだけ
+  const targets = mountains.filter(m => !(m.weather && Object.keys(m.weather).length));
+  if (!targets.length) return;
+
+  const tasks = targets.map(m => async () => {
+    try{
+      m.weather = await generateWeatherScore(m.name, m.lat, m.lng, m.level, m.elev);
+    } catch (e){
+      // 失敗時も落とさない（weather.js 側でダミー生成がある前提）
+      console.warn("[weather] fetch failed:", m.name, e);
     }
   });
-  await Promise.all(workers);
-}
 
-/* ========= Weather on demand (範囲内だけ) ========= */
-function inBounds(m, bounds){
-  if (!bounds) return true;
-  return bounds.contains([m.lat, m.lng]);
-}
-function weatherScoreAt(m, dateKey, time){
-  const s = m.weather?.[dateKey]?.[time];
-  return s || "P";
-}
-
-async function ensureWeatherFor(mountains, { priority=false } = {}){
-  const need = mountains.filter(m => !m._wxOk && !m._wxPromise);
-  if (!need.length) return;
-
-  const ordered = priority ? [...need] : need;
-
-  const tasks = ordered.map(m => async () => {
-    m._wxPromise = (async () => {
-      const w = await generateWeatherScore(m.name, m.lat, m.lng, m.level, m.elev);
-      m.weather = w;
-      m._wxOk = true;
-      m._wxPromise = null;
-    })();
-    await m._wxPromise;
-  });
-
-  // 同時2本（429対策）
   let last = 0;
   await runWithConcurrency(tasks, 2, (done, total) => {
-    if (priority) return;
-    if (done - last >= 6 || done === total){
+    // 進捗の出しすぎ抑制
+    if (done - last >= 12 || done === total){
       last = done;
-      setStatusHtml([
-        `表示範囲の天気を取得中: ${done}/${total}（同時2本 / キャッシュあり）`,
-        `※地図を動かすと必要分だけ追加取得します`,
+      setStatus([
+        `固定データ統合: 合計${ALL.length}件`,
+        `天気取得: ${done}/${total}（同時2本 / キャッシュあり）`,
+        `※天気は初回に順次取得（429対策あり）`
       ]);
+      // リスト表示も少しずつ更新
+      updateView(false);
     }
   });
-
-  updateView();
 }
 
-/* update view */
-let lastBoundsSig = "";
-function updateView(){
-  const { day, time, dateKey, goodOnly, scores, levels, sets } = getState();
-  const bounds = mapObj.getBounds();
+let updating = false;
 
-  const items = [];
-  for (const entry of markerEntries){
-    const m = entry.m;
-    const marker = entry.marker;
+function updateView(triggerWeather = true){
+  if (updating) return;
+  updating = true;
 
-    const prePass =
-      levels.includes(m.level) &&
-      mountainInSelectedSets(m, sets) &&
-      inBounds(m, bounds);
+  try{
+    const items = filterMountains();
+    clearMarkers();
+    for (const m of items) addMarkerForMountain(m);
+    renderList(items);
 
-    const score = prePass ? weatherScoreAt(m, dateKey, time) : "P";
-
-    const pass =
-      prePass &&
-      scores.includes(score) &&
-      !(goodOnly && (score !== "A" || m.level === "上級"));
-
-    if (pass){
-      if (!entry.shown){
-        markerLayer.addLayer(marker);
-        entry.shown = true;
-      }
-      marker.setIcon(icons[score] || icons["P"]);
-      items.push({ m, best: getBestTime(m.weather, dateKey), marker, score });
-    }else{
-      if (entry.shown){
-        markerLayer.removeLayer(marker);
-        entry.shown = false;
-      }
-      if (currentDetail?.mountain === m) closeDetail();
+    // 天気を “勝手に” 読みにいく（地図を動かさなくても）
+    if (triggerWeather) {
+      // 非同期で投げる（UIブロックしない）
+      autoFetchWeather(items);
     }
+
+  } finally {
+    updating = false;
   }
-
-  drawList(items, day);
-
-  if (currentDetail?.mountain){
-    detailTitle.textContent = currentDetail.mountain.name;
-    detailBody.innerHTML = detailHtml(currentDetail.mountain, time);
-  }
-
-  // 範囲内の「必要な山」だけ天気を取りに行く
-  const sig = `${bounds.getSouthWest().lat.toFixed(2)},${bounds.getSouthWest().lng.toFixed(2)}:${bounds.getNorthEast().lat.toFixed(2)},${bounds.getNorthEast().lng.toFixed(2)}|${sets.join(",")}|${levels.join(",")}`;
-  if (sig !== lastBoundsSig){
-    lastBoundsSig = sig;
-    const visibleNeed = markerEntries
-      .map(e => e.m)
-      .filter(m =>
-        Number.isFinite(m.lat) && Number.isFinite(m.lng) &&
-        inBounds(m, bounds) &&
-        levels.includes(m.level) &&
-        mountainInSelectedSets(m, sets)
-      )
-      .slice(0, 60);
-    ensureWeatherFor(visibleNeed);
-  }
-
-  setTimeout(() => mapObj.invalidateSize(), 60);
 }
 
-/* init */
-async function init(){
-  initDaySelectLabels();
-  if (Number(daySelect.value) === 0) setSliderIndex(nearestTimeSlotIndexNow());
-
-  const all = [...byName.values()];
-  const geoOK = all.filter(m => Number.isFinite(m.lat) && Number.isFinite(m.lng));
-
-  setStatusHtml([
-    `固定データ統合: 合計${all.length}件 / 座標あり${geoOK.length}件`,
-    `天気は「表示範囲だけ」取得（429/遅延対策）`,
-    `座標はコード内に固定（自動取得はしない方針）`
-  ]);
-
-  for (const m of geoOK) addMarkerForMountain(m);
-
-  document.querySelectorAll("#control input,#control select").forEach(e => {
-    e.addEventListener("change", () => updateView());
+/* ========= time/day UI ========= */
+function nearestSlotIndex(){
+  const now = new Date();
+  const h = now.getHours();
+  // 06/08/10/12/14/16 を基準に最近傍
+  const slots = [6,8,10,12,14,16];
+  let best = 0, bestDiff = 1e9;
+  slots.forEach((s,i) => {
+    const d = Math.abs(h - s);
+    if (d < bestDiff){ bestDiff = d; best = i; }
   });
-
-  initMobileListGestures();
-  setListCollapsed(isMobile() ? true : false);
-
-  mapObj.on("moveend zoomend", () => updateView());
-
-  // 初回も自動で天気取得を開始（地図を動かさなくても走る）
-  mapObj.whenReady(() => {
-    updateView();
-    setTimeout(() => updateView(), 300);
-  });
+  return best;
 }
-init().catch(e => {
-  console.error(e);
-  setStatusHtml([`初期化エラー: ${String(e?.message || e)}`]);
+function updateTimeLabel(){
+  const idx = Number(slider.value);
+  timeLabel.textContent = timeSlots[idx];
+}
+slider.addEventListener("input", () => { updateTimeLabel(); updateView(false); });
+daySelect.addEventListener("change", () => {
+  // 今日に戻した時は “現在時刻に近い枠” に戻す（既存方針）
+  if (String(daySelect.value) === "0"){
+    slider.value = String(nearestSlotIndex());
+    updateTimeLabel();
+  }
+  updateView(false);
 });
-</script>
 
+updateTimeLabel();
+
+/* ========= init ========= */
+function init(){
+  setStatus([`固定データ統合中...`]);
+
+  // 初回はリスト閉じない（スマホで邪魔なら手で閉じる）
+  listSheet.style.display = "flex";
+
+  // コントロール変更で更新
+  document.querySelectorAll("#control input,#control select").forEach(e => {
+    if (e === daySelect) return;
+    e.addEventListener("change", () => updateView(true));
+  });
+
+  // map操作でも “画面内優先” の表示が変わるので更新（ただし天気取得は既にautoなので false）
+  map.on("moveend zoomend", () => updateView(false));
+
+  updateView(true);
+}
+init();
+</script>
 </body>
 </html>
