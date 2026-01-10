@@ -1,127 +1,240 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>登山向け山岳マップ</title>
+  <meta charset="utf-8">
+  <link rel="icon" href="data:,">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>登山向け山岳マップ</title>
 
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous">
-<link rel="icon" href="data:,">
-
-<style>
-  body { margin:0; font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; }
-  #control{
-    padding:10px; background:#f4f4f4; font-size:14px;
-    display:flex; flex-wrap:wrap; gap:8px 10px; align-items:center;
-  }
-  #control b{ margin-right:4px; }
-  #control label{ white-space:nowrap; }
-  #control .group{
-    display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center;
-    padding:4px 6px; border:1px solid #ddd; border-radius:10px; background:#fff;
-  }
-  .btn{ border:1px solid #cfcfcf; background:#fff; padding:6px 10px; border-radius:10px; font-size:13px; cursor:pointer; }
-  .btn:hover{ background:#f7f7f7; }
-  .chip{ display:inline-block; padding:1px 8px; border-radius:999px; background:#eef6ff; border:1px solid #b7d7ff; font-size:12px; margin-left:6px; }
-  .ok{ background:#eaf7ee; border:1px solid #9ad3a5; }
-  .danger{ background:#ffe7e7; border:1px solid #ffb8b8; }
-
-  #container{ height:calc(100vh - 170px); position:relative; }
-  #map{ height:100%; width:100%; }
-
-  #list{
-    position:absolute; top:0; right:0;
-    width:320px; height:100%; overflow-y:auto;
-    background:#fff; border-left:1px solid #ccc; font-size:13px; z-index:1000;
-  }
-  .list-item{ border-bottom:1px solid #ddd; padding:8px; cursor:pointer; }
-  .list-item:hover{ background:#eef6ff; }
-  .star{ color:gold; font-weight:bold; }
-  .setpill{ display:inline-block; padding:1px 6px; border-radius:999px; font-size:11px; border:1px solid #ddd; background:#fafafa; margin-left:6px; }
-
-  #detailOverlay{ position:fixed; inset:0; background:rgba(0,0,0,0.35); z-index:9999; display:none; }
-  #detailOverlay.show{ display:block; }
-  #detailPanel{ position:absolute; inset:0; background:#fff; display:flex; flex-direction:column; }
-  #detailHeader{
-    position:sticky; top:0; background:#fff; border-bottom:1px solid #ddd;
-    padding:10px 12px; display:flex; align-items:center; justify-content:space-between; gap:10px;
-  }
-  #detailHeader b{ font-size:16px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:70%; }
-  #detailClose{ border:1px solid #ccc; background:#f7f7f7; padding:6px 10px; border-radius:8px; font-size:14px; }
-  #detailBody{ padding:12px; overflow:auto; -webkit-overflow-scrolling:touch; line-height:1.5; }
-
-  @media (min-width:769px){
-    #detailPanel{
-      inset:auto; top:24px; left:50%; transform:translateX(-50%);
-      width:min(980px, calc(100vw - 48px)); height:min(86vh, 900px);
-      border-radius:14px; box-shadow:0 14px 40px rgba(0,0,0,0.24);
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous">
+  <style>
+    body{ margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans JP", sans-serif; }
+    #control{
+      position:fixed; left:0; right:0; top:0;
+      z-index:3000;
+      background:#fff;
+      border-bottom:1px solid #ddd;
+      padding:10px 12px;
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px 14px;
+      align-items:flex-end;
     }
-  }
-
-  .wx-table{ width:100%; border-collapse:collapse; font-size:12px; }
-  .wx-table th, .wx-table td{ border:1px solid #ddd; padding:4px 6px; text-align:center; }
-  .wx-table th{ background:#f7f7f7; font-weight:600; }
-  .wx-current{ background:#eef6ff; font-weight:700; }
-
-  .score-grid{ width:100%; border-collapse:collapse; font-size:12px; }
-  .score-grid td, .score-grid th{ border:1px solid #ddd; padding:4px 0; text-align:center; }
-  .score-grid th{ background:#f7f7f7; font-weight:600; }
-  .score-grid .sel{ outline:2px solid #5aa7ff; outline-offset:-2px; font-weight:800; background:#eef6ff; }
-  .score-grid .a{ background:#eaf7ee; } .score-grid .b{ background:#fff7db; } .score-grid .c{ background:#ffe7e7; }
-  .score-grid .p{ background:#f2f2f2; color:#666; }
-
-  #listHeader{ display:none; } #listTab{ display:none; }
-  @media (max-width:768px){
-    #container{ height:calc(100vh - 220px); }
+    .group{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .group b{ font-size:12px; color:#333; margin-right:4px; }
+    label{ font-size:12px; color:#222; display:inline-flex; align-items:center; gap:4px; }
+    select, input[type="range"]{ font-size:12px; }
+    #container{ position:fixed; left:0; right:0; top:76px; bottom:0; display:flex; }
+    #map{ flex:1; }
     #list{
-      position:fixed; left:0; right:0; bottom:0; top:auto; width:100%; height:45vh;
-      border-left:none; border-top:1px solid #ccc; border-radius:14px 14px 0 0;
-      box-shadow: 0 -6px 18px rgba(0,0,0,0.08);
-      overflow:hidden; z-index:2000;
-      transform: translateY(0); transition: transform 220ms ease;
-      touch-action: pan-y; background:#fff;
+      width:360px;
+      border-left:1px solid #ccc;
+      overflow:hidden;
+      background:#fff;
+      display:flex;
+      flex-direction:column;
     }
-    #list.is-collapsed{ transform: translateY(100%); }
-    #listHeader{
-      display:flex; align-items:center; justify-content:space-between; gap:10px;
-      padding:10px 12px; background:#fff; border-bottom:1px solid #eee; user-select:none;
+    #listBody{ overflow:auto; padding:10px 10px 14px; }
+    .row{
+      border:1px solid #e6e6e6;
+      border-radius:10px;
+      padding:8px 10px;
+      margin:8px 0;
+      cursor:pointer;
+      background:#fff;
     }
-    #listHeader .title{ font-weight:700; font-size:14px; }
-    #listHeader .grip{ width:42px; height:5px; border-radius:999px; background:#d8d8d8; margin:0 10px; }
-    #listHeader .hint{ font-size:12px; color:#666; white-space:nowrap; }
-    #listBody{ height:calc(45vh - 48px); overflow:auto; -webkit-overflow-scrolling:touch; }
-    #listTab{
-      display:block; position:fixed; left:12px; bottom:12px; z-index:2500;
-      padding:10px 12px; border-radius:999px; border:1px solid #cfcfcf; background:#fff;
-      box-shadow: 0 6px 16px rgba(0,0,0,0.12); font-size:13px;
+    .row:hover{ background:#fafafa; }
+    .row .top{ display:flex; justify-content:space-between; gap:10px; }
+    .row .name{ font-weight:700; }
+    .row .meta{ font-size:12px; color:#555; margin-top:4px; }
+    .pill{
+      display:inline-block;
+      padding:1px 7px;
+      border-radius:999px;
+      font-size:11px;
+      border:1px solid #ddd;
+      background:#f7f7f7;
+      margin-left:6px;
+      color:#333;
     }
-    #listTab.hidden{ display:none; }
-  }
-</style>
-</head>
+    .setpill{
+      display:inline-block;
+      padding:1px 7px;
+      border-radius:999px;
+      font-size:11px;
+      border:1px solid #d8d8d8;
+      background:#f6f6f6;
+      margin-left:6px;
+      color:#333;
+    }
 
+    /* detail overlay */
+    #detailOverlay{
+      position:fixed;
+      inset:0;
+      z-index:4000;
+      background:rgba(0,0,0,0.35);
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:14px;
+    }
+    #detailOverlay.show{ display:flex; }
+    #detailPanel{
+      width:min(760px, 96vw);
+      max-height:86vh;
+      overflow:auto;
+      background:#fff;
+      border-radius:14px;
+      box-shadow:0 12px 40px rgba(0,0,0,0.22);
+    }
+    #detailHeader{
+      position:sticky; top:0;
+      background:#fff;
+      border-bottom:1px solid #eee;
+      padding:10px 12px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+    }
+    #detailTitle{ font-size:14px; }
+    #detailClose{ padding:6px 10px; font-size:12px; }
+
+    #detailBody{ padding:12px; font-size:13px; line-height:1.55; }
+
+    .meta-box{
+      border:1px solid #eee;
+      border-radius:10px;
+      padding:10px 10px;
+      background:#fbfbfb;
+      margin-top:10px;
+    }
+    .meta-line{ display:flex; justify-content:space-between; gap:10px; margin:4px 0; }
+    .badge{ padding:1px 8px; border-radius:999px; font-size:11px; border:1px solid #ddd; }
+    .badge-api{ background:#eaf7ee; border-color:#cfe9d7; }
+    .badge-dummy{ background:#ffe7e7; border-color:#ffd0d0; }
+    .meta-warn{ color:#b00020; font-weight:700; }
+
+    .wx-table{
+      width:100%;
+      border-collapse:collapse;
+      font-size:12px;
+    }
+    .wx-table th, .wx-table td{
+      border:1px solid #ddd;
+      padding:4px 6px;
+      text-align:center;
+    }
+    .wx-table th{ background:#f7f7f7; font-weight:600; }
+    .wx-current{ background:#eef6ff; font-weight:700; }
+
+    .score-grid{
+      width:100%;
+      border-collapse:collapse;
+      font-size:12px;
+    }
+    .score-grid td, .score-grid th{
+      border:1px solid #ddd;
+      padding:4px 0;
+      text-align:center;
+    }
+    .score-grid th{ background:#f7f7f7; font-weight:600; }
+    .score-grid .sel{
+      outline:2px solid #5aa7ff;
+      outline-offset:-2px;
+      font-weight:800;
+      background:#eef6ff;
+    }
+    .score-grid .a{ background:#eaf7ee; }
+    .score-grid .b{ background:#fff7db; }
+    .score-grid .c{ background:#ffe7e7; }
+
+    /* mobile bottom sheet */
+    #listHeader{ display:none; }
+    #listTab{ display:none; }
+
+    @media (max-width:768px){
+      #container{ top:100px; }
+      #list{
+        position:fixed;
+        left:0; right:0;
+        bottom:0; top:auto;
+        width:100%;
+        height:45vh;
+        border-left:none;
+        border-top:1px solid #ccc;
+        border-radius:14px 14px 0 0;
+        box-shadow: 0 -6px 18px rgba(0,0,0,0.08);
+        overflow:hidden;
+        z-index:2000;
+        transform: translateY(0);
+        transition: transform 220ms ease;
+        touch-action: pan-y;
+        background:#fff;
+      }
+      #list.is-collapsed{ transform: translateY(100%); }
+
+      #listHeader{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:10px;
+        padding:10px 12px;
+        background:#fff;
+        border-bottom:1px solid #eee;
+        user-select:none;
+      }
+      #listHeader .title{ font-weight:700; font-size:14px; }
+      #listHeader .grip{
+        width:42px; height:5px;
+        border-radius:999px;
+        background:#d8d8d8;
+        margin:0 10px;
+      }
+      #listHeader .hint{ font-size:12px; color:#666; white-space:nowrap; }
+
+      #listTab{
+        display:block;
+        position:fixed;
+        left:12px;
+        bottom:14px;
+        z-index:2500;
+        padding:10px 12px;
+        border-radius:999px;
+        border:1px solid #ddd;
+        background:#fff;
+        box-shadow:0 8px 22px rgba(0,0,0,0.14);
+        font-size:13px;
+      }
+      #listTab.hidden{ display:none; }
+    }
+  </style>
+</head>
 <body>
+
 <div id="control">
   <div class="group">
     <b>日付</b>
     <select id="day">
       <option value="0">今日</option>
-      <option value="1">1日後</option>
-      <option value="2">2日後</option>
-      <option value="3">3日後</option>
+      <option value="1">+1日</option>
+      <option value="2">+2日</option>
+      <option value="3">+3日</option>
     </select>
+  </div>
 
+  <div class="group">
     <b>時間帯</b>
-    <input type="range" id="timeSlider" min="0" max="5" value="0">
-    <span id="timeLabel">06–08</span>
+    <input id="timeSlider" type="range" min="0" max="5" step="1" value="0">
+    <span id="timeLabel" class="pill">06–08</span>
   </div>
 
   <div class="group">
     <b>山セット</b>
     <label><input type="checkbox" class="setChk" value="HYAKU" checked>百名山</label>
-    <!-- ★デフォルトONに戻す -->
-    <label><input type="checkbox" class="setChk" value="HANA_100" checked>花の百名山</label>
-    <label><input type="checkbox" class="setChk" value="NIHON_200" checked>二百名山</label>
+    <label><input type="checkbox" class="setChk" value="HANA_100">花の百名山</label>
+    <label><input type="checkbox" class="setChk" value="NIHON_200">二百名山</label>
     <label><input type="checkbox" class="setChk" value="NIHON_300">三百名山</label>
   </div>
 
@@ -178,7 +291,7 @@
 import mountains from "./mountains.js";
 import mountainsExtra from "./mountains_extra.js";
 import { generateWeatherScore } from "./weather.js";
-import { SET_DEFS } from "./mountaimSets.js";
+import { GEO_OVERRIDES, SET_DEFS } from "./mountaimSets.js";
 
 /* ========= utilities ========= */
 const timeSlots  = ["06:00","08:00","10:00","12:00","14:00","16:00"];
@@ -189,210 +302,174 @@ const daySelect = document.getElementById("day");
 const setStatus = document.getElementById("setStatus");
 
 function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+
 function escapeHtml(s){
   return String(s ?? "").replace(/[&<>"']/g, c => ({
     "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
   }[c]));
 }
+function normName(name){
+  return String(name ?? "").trim().replace(/\s+/g,"").replace(/[（(].*?[）)]/g,"");
+}
+function isMobile(){ return window.matchMedia("(max-width: 768px)").matches; }
+
 function setStatusHtml(lines){
-  setStatus.innerHTML = (lines||[]).filter(Boolean).map(escapeHtml).join("<br>");
+  setStatus.innerHTML = (lines || []).map(s => `<div>${escapeHtml(s)}</div>`).join("");
 }
-function pad2(n){ return String(n).padStart(2, "0"); }
-function formatLocalYMD(d){ return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
-function getDateKey(offset){
-  const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() + offset);
-  return formatLocalYMD(d);
-}
-const WDS = ["日","月","火","水","木","金","土"];
-function getDateObj(offset){
-  const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() + offset);
-  return d;
-}
+
+/* date labels */
 function dayLabel(offset){
-  const d = getDateObj(offset);
-  const mm = pad2(d.getMonth()+1), dd = pad2(d.getDate()), wd = WDS[d.getDay()];
-  const rel = offset === 0 ? "今日" : `${offset}日後`;
-  return `${mm}/${dd}(${wd}) ${rel}`;
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  const pad = n => String(n).padStart(2,"0");
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 }
-function initDaySelectLabels(){ [...daySelect.options].forEach(opt => opt.textContent = dayLabel(Number(opt.value))); }
+function getDateKey(offset){
+  const d = new Date();
+  d.setHours(0,0,0,0);
+  d.setDate(d.getDate() + offset);
+  const pad = n => String(n).padStart(2,"0");
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
+function initDaySelectLabels(){
+  [...daySelect.options].forEach(opt => opt.textContent = dayLabel(Number(opt.value)));
+}
+
+/* time slider */
+function sliderIndex(){ return Number(slider.value); }
+function setSliderIndex(i){ slider.value = String(i); updateTimeLabel(); }
+function updateTimeLabel(){
+  timeLabel.textContent = timeLabels[sliderIndex()] ?? "-";
+}
+slider.addEventListener("input", () => updateTimeLabel());
 
 function nearestTimeSlotIndexNow(){
-  const now = new Date();
-  const nowMin = now.getHours() * 60 + now.getMinutes();
-  const starts = timeSlots.map(s => Number(s.slice(0,2)) * 60);
-  let bestIdx = 0, bestDiff = Infinity;
-  starts.forEach((min, idx) => {
-    const diff = Math.abs(nowMin - min);
-    if (diff < bestDiff){ bestDiff = diff; bestIdx = idx; }
-  });
-  if (nowMin < starts[0]) return 0;
-  if (nowMin > starts[starts.length - 1] + 120) return starts.length - 1;
-  return bestIdx;
-}
-function setSliderIndex(idx){
-  slider.value = String(idx);
-  timeLabel.textContent = timeLabels[idx];
-}
-slider.oninput = () => { timeLabel.textContent = timeLabels[Number(slider.value)]; updateView(); };
-daySelect.addEventListener("change", () => {
-  if (Number(daySelect.value)===0) setSliderIndex(nearestTimeSlotIndexNow());
-  updateView();
-});
-const getSelectedTime = () => timeSlots[Number(slider.value)];
-function normName(s){
-  return String(s ?? "").trim().replace(/\s+/g,"").replace(/\[.*?\]/g,"").replace(/[（(].*?[）)]/g,"");
-}
-function setLabel(k){
-  if (k === "HYAKU") return "百名山";
-  return SET_DEFS?.[k]?.label ?? k;
-}
-
-/* ========= concurrency (429対策) ========= */
-async function runWithConcurrency(tasks, concurrency, onProgress){
-  let idx = 0, active = 0, done = 0;
-  return new Promise((resolve) => {
-    const next = () => {
-      while (active < concurrency && idx < tasks.length){
-        const i = idx++;
-        active++;
-        tasks[i]().catch(()=>{}).finally(() => {
-          active--; done++;
-          onProgress?.(done, tasks.length);
-          if (done === tasks.length) resolve();
-          else next();
-        });
-      }
-    };
-    next();
-  });
-}
-
-/* ========= distance helpers（重複消失対策） ========= */
-function toRad(d){ return d * Math.PI / 180; }
-function haversineKm(aLat,aLng,bLat,bLng){
-  const R = 6371;
-  const dLat = toRad(bLat - aLat);
-  const dLng = toRad(bLng - aLng);
-  const s =
-    Math.sin(dLat/2)**2 +
-    Math.cos(toRad(aLat))*Math.cos(toRad(bLat))*Math.sin(dLng/2)**2;
-  return 2*R*Math.asin(Math.min(1, Math.sqrt(s)));
-}
-
-/* ========= merge (同名でも座標が離れていれば別山として保持) ========= */
-function makeKey(baseName, lat, lng){
-  const n = normName(baseName);
-  if (!n) return null;
-  if (Number.isFinite(lat) && Number.isFinite(lng)){
-    return `${n}@${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}`;
-  }
-  return n;
-}
-function getOrCreateGroup(groups, m){
-  if (Number.isFinite(m.lat) && Number.isFinite(m.lng)){
-    for (const g of groups){
-      if (Number.isFinite(g.lat) && Number.isFinite(g.lng)){
-        const dist = haversineKm(m.lat, m.lng, g.lat, g.lng);
-        if (dist <= 5) return g;
-      }
-    }
-  } else {
-    const g0 = groups.find(g => !Number.isFinite(g.lat) || !Number.isFinite(g.lng));
-    if (g0) return g0;
-  }
-  const g = {
-    name: m.name,
-    lat: m.lat ?? null,
-    lng: m.lng ?? null,
-    elev: m.elev ?? null,
-    level: m.level ?? "中級",
-    gpx: m.gpx ?? null,
-    weather: m.weather ?? {},
-    _sets: new Set(m._sets ?? []),
-    _wxPromise: null,
-    _wxOk: false
-  };
-  groups.push(g);
-  return g;
-}
-function mergeInto(target, src){
-  if (!Number.isFinite(target.lat) && Number.isFinite(src.lat)) target.lat = src.lat;
-  if (!Number.isFinite(target.lng) && Number.isFinite(src.lng)) target.lng = src.lng;
-  if (target.elev == null && src.elev != null) target.elev = src.elev;
-  if (!target.level && src.level) target.level = src.level;
-  if (!target.gpx && src.gpx) target.gpx = src.gpx;
-  (src._sets ?? []).forEach(s => target._sets.add(s));
-  if ((!target.weather || Object.keys(target.weather).length === 0) && src.weather && Object.keys(src.weather).length){
-    target.weather = src.weather;
-  }
-}
-const buckets = new Map();
-function addMountainRaw(m){
-  const base = normName(m.name);
-  if (!base) return;
-  if (!buckets.has(base)) buckets.set(base, []);
-  const groups = buckets.get(base);
-  const src = {
-    name: m.name,
-    lat: (m.lat == null ? null : Number(m.lat)),
-    lng: (m.lng == null ? null : Number(m.lng)),
-    elev: (m.elev == null ? null : Number(m.elev)),
-    level: m.level ?? "中級",
-    gpx: m.gpx ?? null,
-    weather: m.weather ?? {},
-    _sets: new Set(m._sets ?? []),
-  };
-  const g = getOrCreateGroup(groups, src);
-  mergeInto(g, src);
-}
-(mountains || []).forEach(m => addMountainRaw({ ...m, _sets:["HYAKU"] }));
-(mountainsExtra || []).forEach(m => addMountainRaw({ ...m, _sets: Array.isArray(m._sets) ? m._sets : [] }));
-
-const mergedMountains = [];
-for (const [base, groups] of buckets.entries()){
-  for (const g of groups){
-    g.key = makeKey(g.name, g.lat, g.lng) || base;
-    mergedMountains.push(g);
-  }
-}
-const geoOK = mergedMountains.filter(m => Number.isFinite(m.lat) && Number.isFinite(m.lng));
-
-/* ========= map ========= */
-const mapObj = L.map("map").setView([36.5, 138], 5);
-L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/hillshademap/{z}/{x}/{y}.png",
-  { opacity: 0.5, attribution:"地理院 陰影" }
-).addTo(mapObj);
-L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png",
-  { opacity: 0.85, attribution:"地理院 地図" }
-).addTo(mapObj);
-
-const markerLayer = L.layerGroup().addTo(mapObj);
-const LEAFLET_SHADOW = "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/images/marker-shadow.png";
-const icon = color => L.icon({
-  iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-${color}.png`,
-  shadowUrl: LEAFLET_SHADOW,
-  iconSize: [25,41],
-  iconAnchor: [12,41]
-});
-const icons = { A:icon("green"), B:icon("yellow"), C:icon("red"), P:icon("grey") };
-const scorePriority = { A:3, B:2, C:1, P:0 };
-
-function getBestTime(weather, dateKey){
-  const w = weather?.[dateKey];
-  if (!w) return null;
-  let best = null;
-  for (const t of timeSlots){
-    const s = w[t];
-    if (!s) continue;
-    if (!best || scorePriority[s] > scorePriority[best.score]) best = { time:t, score:s };
+  const h = new Date().getHours();
+  // 06,08,10,12,14,16 を基準に近い枠へ
+  const centers = [7,9,11,13,15,17];
+  let best=0, bestDiff=999;
+  for (let i=0;i<centers.length;i++){
+    const diff = Math.abs(centers[i]-h);
+    if (diff < bestDiff){ best=i; bestDiff=diff; }
   }
   return best;
 }
+function getSelectedTime(){
+  return timeSlots[sliderIndex()] || timeSlots[0];
+}
+
+/* score priority */
+const scorePriority = { "A":3, "B":2, "C":1, "P":0 };
+
+/* map */
+const mapObj = L.map("map", { zoomControl:true }).setView([36.2, 138.2], 6);
+const tileStd = L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png", {
+  attribution:'&copy; <a href="https://www.gsi.go.jp/">GSI</a>',
+  maxZoom:18
+}).addTo(mapObj);
+const tileRelief = L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/relief/{z}/{x}/{y}.png", {
+  attribution:'&copy; <a href="https://www.gsi.go.jp/">GSI</a>',
+  maxZoom:18,
+  opacity:0.45
+}).addTo(mapObj);
+
+const markerLayer = L.layerGroup().addTo(mapObj);
+
+/* marker icons */
+const LEAFLET_SHADOW = "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/images/marker-shadow.png";
+function iconByColor(color){
+  return new L.Icon({
+    iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-${color}.png`,
+    shadowUrl: LEAFLET_SHADOW,
+    iconSize: [25,41],
+    iconAnchor: [12,41],
+    popupAnchor: [1,-34],
+    shadowSize: [41,41]
+  });
+}
+const icons = {
+  A: iconByColor("green"),
+  B: iconByColor("orange"),
+  C: iconByColor("red"),
+  P: iconByColor("blue"),
+};
+
+/* detail overlay */
+const detailOverlay = document.getElementById("detailOverlay");
+const detailTitle = document.getElementById("detailTitle");
+const detailBody = document.getElementById("detailBody");
+const detailClose = document.getElementById("detailClose");
+let currentDetail = null;
+
+function safeDate(iso){
+  try{
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return null;
+    return d;
+  }catch{ return null; }
+}
+function fmtJpDateTime(iso){
+  const d = safeDate(iso);
+  if (!d) return "-";
+  const pad = (n) => String(n).padStart(2,"0");
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function timeAgo(iso){
+  const d = safeDate(iso);
+  if (!d) return "-";
+  const diff = Date.now() - d.getTime();
+  if (diff < 0) return "未来";
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return "たった今";
+  if (min < 60) return `${min}分前`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}時間前`;
+  const day = Math.floor(h / 24);
+  return `${day}日前`;
+}
+function buildMetaBox(m){
+  const meta = m.weather?._meta || {};
+  const source = meta.source === "api" ? "API" : "DUMMY";
+  const badgeClass = meta.source === "api" ? "badge-api" : "badge-dummy";
+  const fetched = fmtJpDateTime(meta.fetchedAt);
+  const ago = timeAgo(meta.fetchedAt);
+  const lat = (meta.lat ?? m.lat);
+  const lng = (meta.lng ?? m.lng);
+  const reason = meta.source === "dummy" && meta.reason ? meta.reason : null;
+
+  const elevApi = (meta.elevation_api ?? null);
+  const elevMid = (meta.elevation_mid ?? null);
+  const elevSummit = (meta.elevation_summit ?? m.elev ?? null);
+
+  return `
+    <div class="meta-box">
+      <div class="meta-line">
+        <span>データ元</span>
+        <span><span class="badge ${badgeClass}">${source}</span></span>
+      </div>
+      <div class="meta-line">
+        <span>取得時刻</span>
+        <span>${fetched}（${ago}）</span>
+      </div>
+      <div class="meta-line">
+        <span>座標</span>
+        <span>${Number(lat).toFixed(3)}, ${Number(lng).toFixed(3)}</span>
+      </div>
+      <div class="meta-line">
+        <span>標高</span>
+        <span>API:${elevApi ?? "-"}m / 中腹:${elevMid ?? "-"}m / 山頂:${elevSummit ?? "-" }m</span>
+      </div>
+      ${reason ? `<div class="meta-line"><span class="meta-warn">取得失敗</span><span class="meta-warn">${escapeHtml(reason)}</span></div>` : ""}
+      <small>※ DUMMY はAPI取得失敗時の仮データです</small>
+    </div>
+  `;
+}
+
+/* score grid */
 function scoreCellClass(score){
   if (score === "A") return "a";
   if (score === "B") return "b";
   if (score === "C") return "c";
-  if (score === "P") return "p";
   return "";
 }
 function buildScoreGridHtml(m, selDay, selTime){
@@ -408,10 +485,10 @@ function buildScoreGridHtml(m, selDay, selTime){
   for (let d = 0; d <= 3; d++){
     const dk = getDateKey(d);
     const tds = timeSlots.map(t => {
-      const s = m.weather?.[dk]?.[t] ?? "P";
+      const s = m.weather?.[dk]?.[t] ?? "-";
       const base = scoreCellClass(s);
-      const sel = (d===selDay && t===selTime) ? "sel" : "";
-      return `<td class="${base} ${sel}">${s}</td>`;
+      const sel = (d === selDay && t === selTime) ? "sel" : "";
+      return `<td class="${base} ${sel}">${s ?? "-"}</td>`;
     }).join("");
     bodyRows.push(`<tr><th>${escapeHtml(dayLabel(d))}</th>${tds}</tr>`);
   }
@@ -421,42 +498,45 @@ function buildScoreGridHtml(m, selDay, selTime){
       ${head}
       <tbody>${bodyRows.join("")}</tbody>
     </table>
-    <small>※ 未取得は P（灰）</small>
+    <small>※ 選択中の日付×時間は枠線で強調</small>
   `;
 }
-function fmt(n, digits=1){
-  if (n === null || n === undefined) return "-";
-  const v = Number(n);
-  return Number.isFinite(v) ? v.toFixed(digits) : "-";
-}
-function getDetail(m, dateKey, time){
-  return m.weather?._details?.[dateKey]?.[time] ?? null;
+
+/* best time */
+function getBestTime(weather, dateKey){
+  const w = weather?.[dateKey];
+  if (!w) return null;
+  let best = null;
+  for (const t of timeSlots) {
+    const s = w[t];
+    if (!s) continue;
+    if (!best || scorePriority[s] > scorePriority[best.score]) best = { time:t, score:s };
+  }
+  return best;
 }
 
-/* ========= detail overlay ========= */
-const detailOverlay = document.getElementById("detailOverlay");
-const detailTitle = document.getElementById("detailTitle");
-const detailBody = document.getElementById("detailBody");
-const detailClose = document.getElementById("detailClose");
-let currentDetail = null;
+function setLabel(k){
+  return SET_DEFS?.[k]?.label ?? k;
+}
 
-function detailHtml(m, selectedTime){
-  const day = Number(daySelect.value);
+function detailHtml(m, time){
+  const { day } = getState();
   const dateKey = getDateKey(day);
-  const grid = buildScoreGridHtml(m, day, selectedTime);
 
-  const rows = timeSlots.map((t, idx) => {
+  const grid = buildScoreGridHtml(m, day, time);
+
+  const rows = timeSlots.map(t => {
     const s = m.weather?.[dateKey]?.[t] ?? "P";
-    const d = getDetail(m, dateKey, t);
-    const cls = (t === selectedTime) ? "wx-current" : "";
+    const d = m.weather?._detail?.[dateKey]?.[t] || {};
+    const cls = (t === time) ? "wx-current" : "";
     return `
       <tr class="${cls}">
-        <td>${timeLabels[idx]}</td>
+        <td>${t}</td>
         <td><b>${s}</b></td>
-        <td>${d ? fmt(d.precipitation,1) : "-"}</td>
-        <td>${d ? `${fmt(d.windspeed_mid,1)}→${fmt(d.windspeed_summit,1)}` : "-"}</td>
-        <td>${d ? `${fmt(d.gust_mid,1)}→${fmt(d.gust_summit,1)}` : "-"}</td>
-        <td>${d ? `${fmt(d.temp_mid,1)}→${fmt(d.temp_summit,1)}` : "-"}</td>
+        <td>${d.precip ?? "-"}</td>
+        <td>${d.wind ?? "-"}</td>
+        <td>${d.gust ?? "-"}</td>
+        <td>${d.temp ?? "-"}</td>
       </tr>
     `;
   }).join("");
@@ -481,10 +561,13 @@ function detailHtml(m, selectedTime){
         </thead>
         <tbody>${rows}</tbody>
       </table>
-      <small>※ P は「天気未取得」。起動後に自動で順次取得します。</small>
+      <hr>
+      ${buildMetaBox(m)}
+      <small>※ P は「天気未取得」。表示範囲に入ると自動取得します。</small>
     </div>
   `;
 }
+
 function openDetail(m, marker){
   currentDetail = { mountain: m, marker };
   detailTitle.textContent = m.name;
@@ -492,8 +575,9 @@ function openDetail(m, marker){
   detailOverlay.classList.add("show");
   detailOverlay.setAttribute("aria-hidden","false");
   document.body.style.overflow = "hidden";
-  // 詳細を開いた山は優先取得
-  enqueueWeather([m], true);
+
+  // 詳細を開いた山は最優先で天気を取りに行く
+  ensureWeatherFor([m], { priority:true });
 }
 function closeDetail(){
   detailOverlay.classList.remove("show");
@@ -506,34 +590,79 @@ detailClose.onclick = closeDetail;
 detailOverlay.addEventListener("click", (e) => { if (e.target === detailOverlay) closeDetail(); });
 window.addEventListener("keydown", (e) => { if (e.key === "Escape" && detailOverlay.classList.contains("show")) closeDetail(); });
 
-/* ========= markers ========= */
+/* merge mountains (fixed coords only) */
+const byName = new Map();
+function upsertMountain(base){
+  const key = normName(base.name);
+  if (!key) return null;
+
+  // overrides
+  const ov = GEO_OVERRIDES?.[base.name];
+  if (ov?.lat != null && ov?.lng != null){
+    base = { ...base, lat:Number(ov.lat), lng:Number(ov.lng), elev:(ov.elev==null?base.elev:Number(ov.elev)) };
+  }
+
+  const sets = new Set(base._sets ?? []);
+  if (!byName.has(key)){
+    byName.set(key, {
+      name: base.name,
+      lat: base.lat ?? null,
+      lng: base.lng ?? null,
+      elev: base.elev ?? null,
+      level: base.level ?? "中級",
+      gpx: base.gpx ?? null,
+      weather: base.weather ?? {},
+      _sets: sets,
+      _wxPromise: null,
+      _wxOk: false
+    });
+  }else{
+    const m = byName.get(key);
+    if (m.lat == null && base.lat != null) m.lat = base.lat;
+    if (m.lng == null && base.lng != null) m.lng = base.lng;
+    if (m.elev == null && base.elev != null) m.elev = base.elev;
+    if (!m.level && base.level) m.level = base.level;
+    if (!m.gpx && base.gpx) m.gpx = base.gpx;
+    sets.forEach(s => m._sets.add(s));
+  }
+  return byName.get(key);
+}
+mountains.forEach(m => upsertMountain({ ...m, _sets:["HYAKU"] }));
+(mountainsExtra || []).forEach(m => upsertMountain({ ...m, _sets:Array.isArray(m._sets) ? m._sets : [] }));
+
+/* markers */
 const markerEntries = [];
 const markerByKey = new Map();
 function addMarkerForMountain(m){
-  const key = m.key;
+  const key = normName(m.name);
   if (!key || markerByKey.has(key)) return;
+  if (m.lat == null || m.lng == null) return;
+
   const marker = L.marker([m.lat, m.lng], { icon: icons["P"] });
   marker.on("click", () => {
     mapObj.setView([m.lat, m.lng], Math.max(mapObj.getZoom(), 10));
     openDetail(m, marker);
   });
+
   markerEntries.push({ m, marker, shown:false });
   markerByKey.set(key, marker);
 }
-for (const m of geoOK) addMarkerForMountain(m);
 
-/* ========= filters ========= */
+/* filters */
 function getState(){
   const day = Number(daySelect.value);
   const time = getSelectedTime();
   const dateKey = getDateKey(day);
   const goodOnly = document.getElementById("goodOnly").checked;
+
   const scores = [...document.querySelectorAll(
     'input[value="A"]:checked,input[value="B"]:checked,input[value="C"]:checked,input[value="P"]:checked'
   )].map(e => e.value);
+
   const levels = [...document.querySelectorAll(
     'input[value="初級"]:checked,input[value="中級"]:checked,input[value="上級"]:checked'
   )].map(e => e.value);
+
   const sets = [...document.querySelectorAll('.setChk:checked')].map(e => e.value);
   return { day, time, dateKey, goodOnly, scores, levels, sets };
 }
@@ -541,175 +670,156 @@ function mountainInSelectedSets(m, sets){
   if (!sets?.length) return true;
   const ms = m._sets;
   if (!ms || ms.size === 0) return false;
-  return sets.some(s => ms.has(s));
+  for (const s of sets) if (ms.has(s)) return true;
+  return false;
+}
+
+/* list + mobile sheet */
+const list = document.getElementById("list");
+const listBody = document.getElementById("listBody");
+const listHeader = document.getElementById("listHeader");
+const listTab = document.getElementById("listTab");
+
+function setListCollapsed(collapsed){
+  if (!isMobile()) return;
+  list.classList.toggle("is-collapsed", collapsed);
+  listTab.classList.toggle("hidden", !collapsed);
+}
+function initMobileListGestures(){
+  if (!isMobile()) return;
+  listHeader.addEventListener("click", () => setListCollapsed(true));
+  listTab.addEventListener("click", () => setListCollapsed(false));
+
+  let startY=0, curY=0, dragging=false;
+  listHeader.addEventListener("touchstart", (e) => {
+    dragging=true;
+    startY=e.touches[0].clientY;
+    curY=startY;
+  }, { passive:true });
+  listHeader.addEventListener("touchmove", (e) => {
+    if (!dragging) return;
+    curY=e.touches[0].clientY;
+  }, { passive:true });
+  listHeader.addEventListener("touchend", () => {
+    if (!dragging) return;
+    dragging=false;
+    if (curY - startY > 35) setListCollapsed(true);
+  });
+}
+
+function drawList(items, day){
+  const rows = items.map(x => {
+    const m = x.m;
+    const score = x.score;
+    const best = x.best ? `${x.best.time}（${x.best.score}）` : "-";
+    const setPills = m._sets?.size
+      ? [...m._sets].map(s => `<span class="setpill">${escapeHtml(setLabel(s))}</span>`).join("")
+      : "";
+    return `
+      <div class="row" data-name="${escapeHtml(m.name)}">
+        <div class="top">
+          <div class="name">${escapeHtml(m.name)}${setPills}</div>
+          <div><span class="pill">${score}</span></div>
+        </div>
+        <div class="meta">
+          標高:${m.elev ?? "-"}m / 難易度:${escapeHtml(m.level)} / ベスト:${best}
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  listBody.innerHTML = rows || `<div style="color:#666; font-size:13px; padding:8px;">該当なし</div>`;
+
+  [...listBody.querySelectorAll(".row")].forEach(el => {
+    el.addEventListener("click", () => {
+      const name = el.getAttribute("data-name");
+      const key = normName(name);
+      const entry = markerEntries.find(e => normName(e.m.name) === key);
+      if (!entry) return;
+      mapObj.setView([entry.m.lat, entry.m.lng], Math.max(mapObj.getZoom(), 10));
+      openDetail(entry.m, entry.marker);
+    });
+  });
+}
+
+/* concurrency helper */
+async function runWithConcurrency(tasks, concurrency, onProgress){
+  let i = 0;
+  let done = 0;
+  const total = tasks.length;
+  const workers = new Array(concurrency).fill(0).map(async () => {
+    while (true){
+      const idx = i++;
+      if (idx >= total) break;
+      await tasks[idx]();
+      done++;
+      if (onProgress) onProgress(done, total);
+      await sleep(120); // わずかに間隔（429軽減）
+    }
+  });
+  await Promise.all(workers);
+}
+
+/* ========= Weather on demand (範囲内だけ) ========= */
+function inBounds(m, bounds){
+  if (!bounds) return true;
+  return bounds.contains([m.lat, m.lng]);
 }
 function weatherScoreAt(m, dateKey, time){
   const s = m.weather?.[dateKey]?.[time];
   return s || "P";
 }
 
-/* ========= list UI ========= */
-const listEl = document.getElementById("list");
-const listHeaderEl = document.getElementById("listHeader");
-const listBodyEl = document.getElementById("listBody");
-const listTabEl = document.getElementById("listTab");
-function isMobile(){ return window.matchMedia && window.matchMedia("(max-width:768px)").matches; }
-let listCollapsed = false;
-function setListCollapsed(v){
-  listCollapsed = v;
-  if (isMobile()){
-    listEl.classList.toggle("is-collapsed", v);
-    listTabEl.classList.toggle("hidden", !v);
-  }else{
-    listEl.classList.remove("is-collapsed");
-    listTabEl.classList.add("hidden");
-  }
-}
-function initMobileListGestures(){
-  if (!isMobile()) return;
-  listTabEl.onclick = () => setListCollapsed(false);
+async function ensureWeatherFor(mountains, { priority=false } = {}){
+  const need = mountains.filter(m => !m._wxOk && !m._wxPromise);
+  if (!need.length) return;
 
-  let startY = 0, lastDy = 0, dragging = false;
-  listHeaderEl.addEventListener("touchstart", (e) => {
-    if (!e.touches?.length) return;
-    startY = e.touches[0].clientY; lastDy = 0; dragging = true; listEl.style.transition = "none";
-  }, { passive:true });
+  const ordered = priority ? [...need] : need;
 
-  listHeaderEl.addEventListener("touchmove", (e) => {
-    if (!dragging || !e.touches?.length) return;
-    const y = e.touches[0].clientY;
-    const dy = Math.max(0, y - startY);
-    lastDy = dy;
-    listEl.style.transform = `translateY(${Math.min(dy, 260)}px)`;
-  }, { passive:true });
-
-  listHeaderEl.addEventListener("touchend", () => {
-    if (!dragging) return;
-    dragging = false;
-    listEl.style.transition = "";
-    listEl.style.transform = "";
-    if (lastDy > 120) setListCollapsed(true);
+  const tasks = ordered.map(m => async () => {
+    m._wxPromise = (async () => {
+      const w = await generateWeatherScore(m.name, m.lat, m.lng, m.level, m.elev);
+      m.weather = w;
+      m._wxOk = true;
+      m._wxPromise = null;
+    })();
+    await m._wxPromise;
   });
 
-  window.addEventListener("resize", () => setListCollapsed(isMobile() ? listCollapsed : false));
-}
-function drawList(items, day){
-  if (isMobile()){
-    listBodyEl.innerHTML = `<div style="padding:8px 10px; font-weight:700;">${escapeHtml(dayLabel(day))} の山</div>`;
-  } else {
-    listEl.innerHTML = `<b>${escapeHtml(dayLabel(day))} の山</b><br>`;
-  }
-  const target = isMobile() ? listBodyEl : listEl;
-
-  items.forEach(({ m, best, marker, score }) => {
-    const setPills = m._sets?.size
-      ? [...m._sets].map(s => `<span class="setpill">${escapeHtml(setLabel(s))}</span>`).join("")
-      : "";
-    const div = document.createElement("div");
-    div.className = "list-item";
-    div.innerHTML = `
-      <b>${escapeHtml(m.name)}</b>
-      ${(score==="A") ? "<span class='star'>★</span>" : ""}
-      ${setPills}
-      <br>標高:${m.elev ?? "-"}m / ${escapeHtml(m.level)}<br>
-      今:${score ?? "P"} / ベスト:${best ? `${best.time}（${best.score}）` : "-"}
-    `;
-    div.onclick = () => {
-      if (isMobile()) setListCollapsed(true);
-      mapObj.setView([m.lat, m.lng], 11);
-      openDetail(m, marker);
-    };
-    target.appendChild(div);
+  // 同時2本（429対策）
+  let last = 0;
+  await runWithConcurrency(tasks, 2, (done, total) => {
+    if (priority) return;
+    if (done - last >= 6 || done === total){
+      last = done;
+      setStatusHtml([
+        `表示範囲の天気を取得中: ${done}/${total}（同時2本 / キャッシュあり）`,
+        `※地図を動かすと必要分だけ追加取得します`,
+      ]);
+    }
   });
+
+  updateView();
 }
 
-/* ========= 自動天気取得キュー（画面操作不要で回り続ける） ========= */
-const wxQueue = [];           // { m, priority }
-const wxQueued = new Set();   // key
-let wxWorkerRunning = false;
-let wxDoneCount = 0;
-
-function enqueueWeather(ms, priority=false){
-  for (const m of ms){
-    if (!m || m._wxOk || m._wxPromise) continue;
-    const k = m.key;
-    if (wxQueued.has(k)) continue;
-    wxQueued.add(k);
-    wxQueue.push({ m, priority });
-  }
-  // 優先は先頭へ寄せる
-  if (priority){
-    wxQueue.sort((a,b)=> (b.priority===true)-(a.priority===true));
-  }
-  startWxWorker();
-}
-
-async function startWxWorker(){
-  if (wxWorkerRunning) return;
-  wxWorkerRunning = true;
-
-  while (wxQueue.length){
-    // 同時2本で取りに行く（429対策）
-    const batch = wxQueue.splice(0, 8); // まず8件取り出し、runWithConcurrencyで2並列
-    const tasks = batch.map(({m}) => async () => {
-      try{
-        m._wxPromise = generateWeatherScore(m.name, m.lat, m.lng, m.level, m.elev);
-        m.weather = await m._wxPromise;
-        m._wxOk = true;
-        wxDoneCount++;
-      }catch{
-        // 失敗しても次周で再取得できるようにする（ただし即ループしない）
-        m._wxOk = false;
-        await sleep(600);
-      }finally{
-        m._wxPromise = null;
-        wxQueued.delete(m.key);
-      }
-    });
-
-    await runWithConcurrency(tasks, 2, (done,total) => {
-      // 進捗表示（うるさくしすぎない）
-      setStatusHtml(makeStatusLines(`天気自動取得: +${done}/${total}（累計OK:${wxDoneCount}）`));
-    });
-
-    updateView();
-
-    // APIに優しく少し休む
-    await sleep(350);
-  }
-
-  wxWorkerRunning = false;
-}
-
-/* ========= status ========= */
-function countSetTotal(k){
-  return geoOK.filter(m => m._sets?.has(k)).length;
-}
-function countSetShown(k, shownList){
-  return shownList.filter(x => x.m._sets?.has(k)).length;
-}
-function makeStatusLines(extraLine=""){
-  const checkedSets = [...document.querySelectorAll(".setChk:checked")].map(e=>e.value);
-  const totals = `登録: 百=${countSetTotal("HYAKU")} / 花=${countSetTotal("HANA_100")} / 200=${countSetTotal("NIHON_200")} / 300=${countSetTotal("NIHON_300")}`;
-  const sel = `選択セット: ${checkedSets.map(setLabel).join(" / ") || "なし"}`;
-  return [totals, sel, extraLine].filter(Boolean);
-}
-
-/* ========= updateView（表示は全国全件。天気だけ自動取得で埋める） ========= */
+/* update view */
+let lastBoundsSig = "";
 function updateView(){
   const { day, time, dateKey, goodOnly, scores, levels, sets } = getState();
+  const bounds = mapObj.getBounds();
 
   const items = [];
   for (const entry of markerEntries){
     const m = entry.m;
     const marker = entry.marker;
 
-    // ★ここ重要：inBounds を使わない（全国全件表示に戻す）
     const prePass =
       levels.includes(m.level) &&
-      mountainInSelectedSets(m, sets);
+      mountainInSelectedSets(m, sets) &&
+      inBounds(m, bounds);
 
     const score = prePass ? weatherScoreAt(m, dateKey, time) : "P";
+
     const pass =
       prePass &&
       scores.includes(score) &&
@@ -731,34 +841,47 @@ function updateView(){
     }
   }
 
-  // リストは多いので軽く並べる（ただし件数少ない問題の判定に必要）
-  // A/B/C/Pの優先でソート
-  items.sort((a,b)=> (scorePriority[b.score] ?? 0) - (scorePriority[a.score] ?? 0) || a.m.name.localeCompare(b.m.name,"ja"));
   drawList(items, day);
 
-  // 詳細更新
   if (currentDetail?.mountain){
     detailTitle.textContent = currentDetail.mountain.name;
     detailBody.innerHTML = detailHtml(currentDetail.mountain, time);
   }
 
-  // ★自動取得：今表示対象のうち、未取得(P)をキューへ
-  const need = items
-    .filter(x => x.score === "P")
-    .map(x => x.m)
-    .slice(0, 80); // 一度に入れすぎない
-  enqueueWeather(need, false);
+  // 範囲内の「必要な山」だけ天気を取りに行く
+  const sig = `${bounds.getSouthWest().lat.toFixed(2)},${bounds.getSouthWest().lng.toFixed(2)}:${bounds.getNorthEast().lat.toFixed(2)},${bounds.getNorthEast().lng.toFixed(2)}|${sets.join(",")}|${levels.join(",")}`;
+  if (sig !== lastBoundsSig){
+    lastBoundsSig = sig;
+    const visibleNeed = markerEntries
+      .map(e => e.m)
+      .filter(m =>
+        Number.isFinite(m.lat) && Number.isFinite(m.lng) &&
+        inBounds(m, bounds) &&
+        levels.includes(m.level) &&
+        mountainInSelectedSets(m, sets)
+      )
+      .slice(0, 60);
+    ensureWeatherFor(visibleNeed);
+  }
 
-  // ステータス（「表示件数が少ない」問題を即検知できる）
-  const shown = items;
-  const shownLine = `表示: 合計=${shown.length} / 百=${countSetShown("HYAKU", shown)} 花=${countSetShown("HANA_100", shown)} 200=${countSetShown("NIHON_200", shown)} 300=${countSetShown("NIHON_300", shown)}`;
-  setStatusHtml([...makeStatusLines(shownLine)]);
+  setTimeout(() => mapObj.invalidateSize(), 60);
 }
 
-/* ========= init ========= */
+/* init */
 async function init(){
   initDaySelectLabels();
   if (Number(daySelect.value) === 0) setSliderIndex(nearestTimeSlotIndexNow());
+
+  const all = [...byName.values()];
+  const geoOK = all.filter(m => Number.isFinite(m.lat) && Number.isFinite(m.lng));
+
+  setStatusHtml([
+    `固定データ統合: 合計${all.length}件 / 座標あり${geoOK.length}件`,
+    `天気は「表示範囲だけ」取得（429/遅延対策）`,
+    `座標はコード内に固定（自動取得はしない方針）`
+  ]);
+
+  for (const m of geoOK) addMarkerForMountain(m);
 
   document.querySelectorAll("#control input,#control select").forEach(e => {
     e.addEventListener("change", () => updateView());
@@ -767,24 +890,19 @@ async function init(){
   initMobileListGestures();
   setListCollapsed(isMobile() ? true : false);
 
-  // 初回：全国表示 + 自動取得開始
-  updateView();
+  mapObj.on("moveend zoomend", () => updateView());
 
-  // 起動直後も、画面操作なしで自動取得が回り続けるよう、少しずつ追加投入
-  // （最初のupdateViewだけだとフィルタ条件次第で投入が少ないため）
-  for (let i=0; i<3; i++){
-    const { day, time, dateKey, scores, levels, sets } = getState();
-    const preload = geoOK
-      .filter(m => levels.includes(m.level) && mountainInSelectedSets(m, sets))
-      .slice(i*60, i*60 + 60);
-    enqueueWeather(preload, false);
-    await sleep(250);
-  }
+  // 初回も自動で天気取得を開始（地図を動かさなくても走る）
+  mapObj.whenReady(() => {
+    updateView();
+    setTimeout(() => updateView(), 300);
+  });
 }
 init().catch(e => {
   console.error(e);
   setStatusHtml([`初期化エラー: ${String(e?.message || e)}`]);
 });
 </script>
+
 </body>
 </html>
