@@ -212,7 +212,32 @@ function setLabel(k){
   return MAP[k] ?? k;
 }
 
-/* ========= （座標固定化/自動取得機能は廃止：ChatGPTで生成した mountains_extra.js を固定で使用） ========= */
+/* ========= 429対策：同時実行制限 ========= */
+async function runWithConcurrency(tasks, concurrency, onProgress){
+  let idx = 0, active = 0, done = 0;
+  const results = new Array(tasks.length);
+
+  return new Promise((resolve) => {
+    const next = () => {
+      if (done === tasks.length) return resolve(results);
+      while (active < concurrency && idx < tasks.length){
+        const cur = idx++;
+        active++;
+        Promise.resolve()
+          .then(() => tasks[cur]())
+          .then(res => { results[cur] = res; })
+          .catch(err => { results[cur] = { __error: err }; })
+          .finally(() => {
+            active--;
+            done++;
+            onProgress?.(done, tasks.length);
+            next();
+          });
+      }
+    };
+    next();
+  });
+}
 
 /* ========= map ========= */
 const mapObj = L.map("map").setView([36.5, 138], 5);
@@ -302,7 +327,6 @@ function mergeAll(){
     const prev = map.get(key);
     if (prev){
       const s = new Set([...(prev._sets||[]), ...(base._sets||[])]);
-      // lat/lng/elev は既存があれば優先（百名山側）
       map.set(key, {
         ...base,
         ...prev,
@@ -362,6 +386,25 @@ function filterMountains(){
 const markerLayer = L.layerGroup().addTo(mapObj);
 const markerMap = new Map();
 
+/* 元HTMLのピン色ロジック・更新ロジックを保持（このファイルは固定化機能のみ除去） */
+function makeSvgIcon(color){
+  const svg = `
+  <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 26 26">
+    <circle cx="13" cy="13" r="10" fill="${color}" stroke="#222" stroke-width="2"/>
+  </svg>`;
+  return L.icon({
+    iconUrl: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg),
+    iconSize: [26,26],
+    iconAnchor: [13,13]
+  });
+}
+const icons = {
+  A: makeSvgIcon("#2ecc71"),
+  B: makeSvgIcon("#f1c40f"),
+  C: makeSvgIcon("#e74c3c"),
+  P: makeSvgIcon("#aaaaaa")
+};
+
 function clearMarkers(){
   markerLayer.clearLayers();
   markerMap.clear();
@@ -402,19 +445,28 @@ function openDetail(m){
 }
 
 function addMarker(m){
-  const marker = L.marker([m.lat, m.lng]);
+  const score = m.weather?.score ?? "P";
+  const icon = icons[score] ?? icons.P;
+  const marker = L.marker([m.lat, m.lng], { icon });
   marker.on("click", () => openDetail(m));
   marker.addTo(markerLayer);
   markerMap.set(normName(m.name), marker);
 }
 
+function repaintMarker(m){
+  const key = normName(m.name);
+  const marker = markerMap.get(key);
+  if (!marker) return;
+  const score = m.weather?.score ?? "P";
+  const icon = icons[score] ?? icons.P;
+  marker.setIcon(icon);
+}
+
 function renderList(items){
-  // 画面内優先（従来挙動を維持）
   const bounds = mapObj.getBounds();
   const inView = items.filter(m => bounds.contains([m.lat, m.lng]));
   const target = inView.length ? inView : items;
 
-  // 高い順
   target.sort((a,b) => (b.elev||0) - (a.elev||0));
 
   let html = "";
@@ -451,7 +503,7 @@ function renderList(items){
   ]);
 }
 
-/* ========= weather (rate limit + retry) ========= */
+/* ========= Weather on demand (範囲内だけ) ========= */
 let weatherQueueRunning = false;
 
 async function runWeatherQueue(items){
@@ -459,49 +511,33 @@ async function runWeatherQueue(items){
   weatherQueueRunning = true;
 
   try{
-    // 未取得を対象（P）
     const targets = items.filter(m => !(m.weather && m.weather.score) || m.weather.score === "P");
 
-    // 同時2本（429対策）
-    const concurrency = 2;
-    let idx = 0;
-    let active = 0;
+    const tasks = targets.map(m => async () => {
+      const dayOffset = Number(daySelect.value);
+      const slotIndex = Number(slider.value);
 
-    await new Promise(resolve => {
-      const next = async () => {
-        if (idx >= targets.length && active === 0) return resolve();
-        while (active < concurrency && idx < targets.length){
-          const m = targets[idx++];
-          active++;
-
-          (async () => {
-            // リトライ（429など）
-            let lastErr = null;
-            for (let t=0; t<3; t++){
-              try{
-                const dayOffset = Number(daySelect.value);
-                const slotIndex = Number(slider.value);
-                m.weather = await generateWeatherScore(m.name, m.lat, m.lng, m.level, m.elev, dayOffset, slotIndex);
-                lastErr = null;
-                break;
-              }catch(e){
-                lastErr = e;
-                await sleep(350 + t*550);
-              }
-            }
-            if (lastErr){
-              // 失敗しても落とさない
-              console.warn("[weather] failed:", m.name, lastErr);
-            }
-          })().finally(() => {
-            active--;
-            // 部分更新（既存の「自動で進む」を維持）
-            update(false);
-            next();
-          });
+      let lastErr = null;
+      for (let t=0; t<3; t++){
+        try{
+          m.weather = await generateWeatherScore(m.name, m.lat, m.lng, m.level, m.elev, dayOffset, slotIndex);
+          repaintMarker(m);
+          lastErr = null;
+          break;
+        }catch(e){
+          lastErr = e;
+          await sleep(350 + t*550);
         }
-      };
-      next();
+      }
+      if (lastErr) console.warn("[weather] failed:", m.name, lastErr);
+    });
+
+    let last = 0;
+    await runWithConcurrency(tasks, 2, (done, total) => {
+      if (done - last >= 12 || done === total){
+        last = done;
+        update(false);
+      }
     });
   }finally{
     weatherQueueRunning = false;
@@ -516,7 +552,6 @@ function update(triggerWeather=true){
   renderList(items);
 
   if (triggerWeather){
-    // 触らなくても順次取りに行く
     runWeatherQueue(items);
   }
 }
@@ -524,7 +559,6 @@ function update(triggerWeather=true){
 /* ========= event wiring ========= */
 document.querySelectorAll("#control input, #control select").forEach(el => {
   el.addEventListener("change", () => {
-    // 今日に戻したとき、時間帯を現在に近い枠へ戻す（従来仕様維持）
     if (el === daySelect && String(daySelect.value) === "0"){
       slider.value = String(nearestSlotIndex());
       updateTimeLabel();
@@ -537,10 +571,8 @@ slider.addEventListener("input", () => {
   update(false);
 });
 
-// map操作で画面内優先リスト更新（従来挙動維持）
 mapObj.on("moveend zoomend", () => update(false));
 
-// 初期：今日なら時間帯を現在に近い枠へ
 if (String(daySelect.value) === "0"){
   slider.value = String(nearestSlotIndex());
   updateTimeLabel();
