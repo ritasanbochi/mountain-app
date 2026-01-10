@@ -159,6 +159,27 @@ const mountainsExtra = [
   { name:"鹿島槍ヶ岳", lat:36.623, lng:137.746, elev:2889, level:"上級", gpx:null, weather:{}, _sets:["HANA_100"] },
   { name:"黒姫山", lat:36.8106, lng:138.1261, elev:2053, level:"上級", gpx:null, weather:{}, _sets:["NIHON_200"] },
   { name:"黒部五郎岳", lat:36.388, lng:137.603, elev:2840, level:"上級", gpx:null, weather:{}, _sets:["HANA_100"] },
+  
+];
+// 追加: 未確認だった座標の確定分（ChatGPT側で再チェック済み）
+export const EXTRA_COORDS_FIXED = [
+  // ===== 二百名山/花100 などで未確認が出やすい系 =====
+  { name:"泉ヶ岳", lat:38.412194, lng:140.708806, elev:1175, level:"中級", gpx:null, weather:{} }, // 泉ヶ岳山頂 :contentReference[oaicite:0]{index=0}
+  { name:"摩耶山", lat:38.520000, lng:139.727780, elev:1019.8, level:"中級", gpx:null, weather:{} }, // 山形県の摩耶山 :contentReference[oaicite:1]{index=1}
+
+  { name:"乾徳山", lat:35.822722, lng:138.714861, elev:2031, level:"中級", gpx:null, weather:{} }, // :contentReference[oaicite:2]{index=2}
+  { name:"蓼科山", lat:36.103610, lng:138.295000, elev:2531, level:"中級", gpx:null, weather:{} }, // :contentReference[oaicite:3]{index=3}
+
+  { name:"御在所岳", lat:35.020560, lng:136.417780, elev:1212, level:"中級", gpx:null, weather:{} }, // :contentReference[oaicite:4]{index=4}
+  { name:"金剛山", lat:34.419440, lng:135.673060, elev:1125, level:"中級", gpx:null, weather:{} }, // :contentReference[oaicite:5]{index=5}
+
+  { name:"天城山", lat:34.862780, lng:139.001670, elev:1406, level:"中級", gpx:null, weather:{} }, // 万三郎岳 :contentReference[oaicite:6]{index=6}
+  { name:"金北山", lat:38.103890, lng:138.349720, elev:1171.9, level:"中級", gpx:null, weather:{} }, // :contentReference[oaicite:7]{index=7}
+  { name:"毛無山", lat:35.415830, lng:138.543890, elev:1964, level:"中級", gpx:null, weather:{} }, // 山梨/静岡 :contentReference[oaicite:8]{index=8}
+
+  { name:"比叡山", lat:35.066667, lng:135.838333, elev:848.1, level:"中級", gpx:null, weather:{} }, // 大比叡（三角点） :contentReference[oaicite:9]{index=9}
+  { name:"六甲山", lat:34.778004, lng:135.263741, elev:931.25, level:"中級", gpx:null, weather:{} }, // 六甲（山）最高峰 :contentReference[oaicite:10]{index=10}
+  { name:"大崩山", lat:32.737694, lng:131.513111, elev:1644, level:"中級", gpx:null, weather:{} }, // :contentReference[oaicite:11]{index=11}
 ];
 
 export default mountainsExtra;
