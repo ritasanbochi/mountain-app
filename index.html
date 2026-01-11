@@ -117,6 +117,31 @@
       #list{ width:auto; max-height: 38vh; border-right:none; border-bottom:1px solid var(--line); }
       #map{ height: calc(100vh - 64px - 38vh); }
     }
+  /* NowLoading overlay（取得中は画面操作をブロック） */
+#loadingOverlay{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.35);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  pointer-events: auto; /* クリックを吸収して操作不能化 */
+}
+#loadingOverlay .box{
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 14px;
+  padding: 14px 16px;
+  min-width: 220px;
+  max-width: 86vw;
+  font-size: 14px;
+  line-height: 1.4;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.18);
+  text-align: center;
+}
+#loadingOverlay .box b{ display:block; margin-bottom:6px; font-size:15px; }
+#loadingOverlay .box .sub{ color:#666; font-size:12px; }
   </style>
 </head>
 
@@ -158,8 +183,8 @@
       <div class="seg">
         <b>表示セット</b>
         <label class="cb" style="min-width:170px;"><span>百名山</span><input type="checkbox" id="setHYAKU" checked></label>
-        <label class="cb" style="min-width:170px;"><span>花の百名山</span><input type="checkbox" id="setHANA" checked></label>
-        <label class="cb" style="min-width:170px;"><span>二百名山</span><input type="checkbox" id="setN200" checked></label>
+        <label class="cb" style="min-width:170px;"><span>花の百名山</span><input type="checkbox" id="setHANA"></label>
+        <label class="cb" style="min-width:170px;"><span>二百名山</span><input type="checkbox" id="setN200"></label>
         <span class="chip" id="countChip">読込中...</span>
       </div>
     </div>
@@ -171,6 +196,14 @@
     <div id="list"></div>
     <div id="map"></div>
   </div>
+
+<div id="loadingOverlay" aria-hidden="true">
+  <div class="box">
+    <b>NowLoading...</b>
+    <div class="sub" id="loadingSub">天気を取得中です</div>
+  </div>
+</div>
+
 
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script type="module">
@@ -352,25 +385,39 @@
     /* ========= weather cache in memory ========= */
     // mountainKey -> weatherObject
     const WX = new Map();
-    const WX_META = { ok:0, ng:0, cacheHit:0, lastErr:"" };
+const WX_META = { ok:0, ng:0, cacheHit:0, lastErr:"" };
 
-    async function ensureWeatherFor(m){
-      const key = normName(m.name);
-      if (WX.has(key)) return WX.get(key);
+// 失敗を null で固定キャッシュしない（=以後取りに行かなくなる事故防止）
+// ただし無限リトライで429を誘発しないよう、山ごとに短時間だけ再試行を抑制する
+const WX_FAIL_NEXT = new Map(); // key -> nextAt(ms)
 
-      try{
-        // generateWeatherScore の返り値は weather[dateKey][time] と weather.__detail が前提 :contentReference[oaicite:1]{index=1}
-        const w = await generateWeatherScore(m.name, m.lat, m.lng, m.level || "中級", m.elev ?? null);
-        WX.set(key, w);
-        WX_META.ok++;
-        return w;
-      }catch(e){
-        WX.set(key, null);
-        WX_META.ng++;
-        WX_META.lastErr = String(e?.message || e);
-        return null;
-      }
+async function ensureWeatherFor(m){
+  const key = normName(m.name);
+
+  // 成功キャッシュがあれば返す
+  const cached = WX.get(key);
+  if (cached) return cached;
+
+  // 直近失敗後のクールダウン中はスキップ
+  const nextAt = WX_FAIL_NEXT.get(key) || 0;
+  if (Date.now() < nextAt) return null;
+
+  try{
+    const w = await generateWeatherScore(m.name, m.lat, m.lng, m.level || "中級", m.elev ?? null);
+    if (w){
+      WX.set(key, w);
+      WX_META.ok++;
+      return w;
     }
+    return null;
+  }catch(e){
+    WX_META.ng++;
+    WX_META.lastErr = String(e?.message || e);
+    // 30秒クールダウン（429/ネット不安定で連打しない）
+    WX_FAIL_NEXT.set(key, Date.now() + 30_000);
+    return null;
+  }
+}    
 
     function scoreAt(m, dateKey, timeSlot){
       const w = WX.get(normName(m.name));
@@ -557,62 +604,75 @@
       refreshStatusUI([`表示: ${vis.length}件（${escapeHtml(dayLabel(getDateOffset()))} ${escapeHtml(timeSlot)}）`]);
 
       // ✅ “画面を動かさないと天気が来ない”対策：描画のたびに先読みを走らせる
-      prefetchWeather(vis);
+      PREFETCH_TOKEN++;
+      prefetchWeather(vis, PREFETCH_TOKEN);
     }
 
+/* ========= auto prefetch (rate limited) ========= */
+let PREFETCH_RUNNING = false;
+let PREFETCH_TOKEN = 0;
 
-    const loadingOverlay = document.getElementById("loadingOverlay");
-    const loadingOverlaySub = document.getElementById("loadingOverlaySub");
+const loadingOverlay = document.getElementById("loadingOverlay");
+const loadingSub = document.getElementById("loadingSub");
+function showLoading(msg){
+  if (!loadingOverlay) return;
+  if (loadingSub && msg) loadingSub.textContent = msg;
+  loadingOverlay.style.display = "flex";
+  loadingOverlay.setAttribute("aria-hidden","false");
+}
+function hideLoading(){
+  if (!loadingOverlay) return;
+  loadingOverlay.style.display = "none";
+  loadingOverlay.setAttribute("aria-hidden","true");
+}
 
-    function setLoadingOverlay(on, subText){
-      if (!loadingOverlay) return;
-      if (loadingOverlaySub && typeof subText === "string") loadingOverlaySub.textContent = subText;
-      loadingOverlay.style.display = on ? "flex" : "none";
-    }
+    async function prefetchWeather(list, token){
+  if (PREFETCH_RUNNING) return;
+  PREFETCH_RUNNING = true;
 
+  try{
+    showLoading("天気を取得中です（操作できません）");
 
-    /* ========= auto prefetch (rate limited) ========= */
-    let PREFETCH_RUNNING = false;
+    // 一気に投げると 429 になるので、少数並列 + 待ち
+    const concurrency = 3;
+    const queue = list.slice(); // 表示中はすべて対象（60件制限は撤廃）
+    let idx = 0;
 
-    async function prefetchWeather(list){
-      if (PREFETCH_RUNNING) return;
-      PREFETCH_RUNNING = true;
+    async function worker(){
+      while (idx < queue.length){
+        if (token !== PREFETCH_TOKEN) return; // drawで更新されたら中断
+        const m = queue[idx++];
 
-      try{
-        // 一気に投げると 429 になるので、少数並列 + 待ち
-        const concurrency = 3;
-        const queue = list.slice(); // 表示中の対象を順次取得（429回避のため少数並列＋待ち）
-        let idx = 0;
+        await ensureWeatherFor(m);
 
-        async function worker(){
-          while (idx < queue.length){
-            const m = queue[idx++];
-            await ensureWeatherFor(m);
-
-            // marker色更新
-            const dateKey = getDateKey(getDateOffset());
-            const timeSlot = getSelectedTimeSlot();
-            const sc = scoreAt(m, dateKey, timeSlot);
-            const mk = MARKERS.get(normName(m.name));
-            if (mk){
-              mk.setIcon(ICONS[sc] || ICONS.N);
-              mk.setPopupContent(popupHtml(m));
-            }
-
-            refreshStatusUI([`天気先読み中... ${Math.min(idx, queue.length)}/${queue.length}`]);
-            await new Promise(r => setTimeout(r, 120)); // 軽く間引き
-          }
+        // marker色更新 + popup更新
+        const dateKey = getDateKey(getDateOffset());
+        const timeSlot = getSelectedTimeSlot();
+        const sc = scoreAt(m, dateKey, timeSlot);
+        const mk = MARKERS.get(normName(m.name));
+        if (mk){
+          mk.setIcon(ICONS[sc] || ICONS.N);
+          mk.setPopupContent(popupHtml(m));
         }
 
-        await Promise.all(Array.from({length:concurrency}, worker));
-        refreshStatusUI([`天気先読み完了（表示中 ${list.length}件）`]);
-
-      }finally{
-        PREFETCH_RUNNING = false;
+        refreshStatusUI([`天気先読み中... ${Math.min(idx, queue.length)}/${queue.length}`]);
+        await new Promise(r => setTimeout(r, 120)); // 軽く間引き
       }
     }
 
-    /* ========= events ========= */
+    await Promise.all(Array.from({length:concurrency}, worker));
+
+    if (token === PREFETCH_TOKEN){
+      refreshStatusUI([`天気先読み完了（表示中 ${queue.length}件）`]);
+    }
+
+  }finally{
+    hideLoading();
+    PREFETCH_RUNNING = false;
+  }
+}
+
+/* ========= events ========= */
     document.querySelectorAll('#control input[type="checkbox"]').forEach(el=>{
       el.addEventListener("change", draw);
     });
@@ -622,28 +682,5 @@
     timeLabel.textContent = timeLabels[Number(slider.value)];
     draw();
   </script>
-
-  <div id="loadingOverlay" style="
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.25);
-    display: none;
-    align-items: center;
-    justify-content: center;
-    z-index: 9999;
-  ">
-    <div style="
-      background: rgba(255,255,255,0.95);
-      border-radius: 12px;
-      padding: 14px 16px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.2);
-      font-size: 14px;
-      line-height: 1.4;
-    ">
-      <div style="font-weight: 700; margin-bottom: 6px;">NowLoading...</div>
-      <div id="loadingOverlaySub" style="opacity: 0.85;">天気情報を取得中</div>
-    </div>
-  </div>
-
 </body>
 </html>
