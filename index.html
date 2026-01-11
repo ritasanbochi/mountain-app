@@ -477,7 +477,7 @@ async function ensureWeatherFor(m){
     WX_FAIL_NEXT.set(key, Date.now() + 30_000);
     return null;
   }
-}    }
+}    
 
     function scoreAt(m, dateKey, timeSlot){
       const w = WX.get(normName(m.name));
