@@ -117,31 +117,16 @@
       #list{ width:auto; max-height: 38vh; border-right:none; border-bottom:1px solid var(--line); }
       #map{ height: calc(100vh - 64px - 38vh); }
     }
-  /* NowLoading overlay（取得中は画面操作をブロック） */
-#loadingOverlay{
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.35);
-  display: none;
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
-  pointer-events: auto; /* クリックを吸収して操作不能化 */
-}
-#loadingOverlay .box{
-  background: #fff;
-  border: 1px solid #ddd;
-  border-radius: 14px;
-  padding: 14px 16px;
-  min-width: 220px;
-  max-width: 86vw;
-  font-size: 14px;
-  line-height: 1.4;
-  box-shadow: 0 10px 28px rgba(0,0,0,0.18);
-  text-align: center;
-}
-#loadingOverlay .box b{ display:block; margin-bottom:6px; font-size:15px; }
-#loadingOverlay .box .sub{ color:#666; font-size:12px; }
+    /* ===== overlay & score table (minimal) ===== */
+    #mountOverlay{ position:fixed; inset:0; display:none; z-index:9999; background:rgba(0,0,0,.45); }
+    #mountOverlay .box{ position:absolute; inset:12px; background:#fff; border-radius:12px; overflow:auto; box-shadow:0 10px 30px rgba(0,0,0,.25); }
+    #mountOverlay .head{ position:sticky; top:0; background:#fff; border-bottom:1px solid var(--line); padding:10px 12px; display:flex; justify-content:space-between; align-items:center; }
+    #mountOverlay .closeBtn{ border:1px solid var(--line); background:#fff; border-radius:10px; padding:6px 10px; cursor:pointer; }
+    #mountOverlay .content{ padding:12px; }
+    .wxTableWrap{ overflow:auto; border:1px solid var(--line); border-radius:10px; }
+    table.wxScoreTable{ border-collapse:collapse; width:max-content; min-width:100%; font-size:12px; }
+    .wxScoreTable th, .wxScoreTable td{ border-bottom:1px solid var(--line); border-right:1px solid var(--line); padding:6px 8px; text-align:center; }
+    .wxScoreTable th:first-child, .wxScoreTable td:first-child{ position:sticky; left:0; background:#fff; text-align:left; }
   </style>
 </head>
 
@@ -183,8 +168,8 @@
       <div class="seg">
         <b>表示セット</b>
         <label class="cb" style="min-width:170px;"><span>百名山</span><input type="checkbox" id="setHYAKU" checked></label>
-        <label class="cb" style="min-width:170px;"><span>花の百名山</span><input type="checkbox" id="setHANA"></label>
-        <label class="cb" style="min-width:170px;"><span>二百名山</span><input type="checkbox" id="setN200"></label>
+        <label class="cb" style="min-width:170px;"><span>花の百名山</span><input type="checkbox" id="setHANA" checked></label>
+        <label class="cb" style="min-width:170px;"><span>二百名山</span><input type="checkbox" id="setN200" checked></label>
         <span class="chip" id="countChip">読込中...</span>
       </div>
     </div>
@@ -196,14 +181,6 @@
     <div id="list"></div>
     <div id="map"></div>
   </div>
-
-<div id="loadingOverlay" aria-hidden="true">
-  <div class="box">
-    <b>NowLoading...</b>
-    <div class="sub" id="loadingSub">天気を取得中です</div>
-  </div>
-</div>
-
 
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script type="module">
@@ -385,39 +362,38 @@
     /* ========= weather cache in memory ========= */
     // mountainKey -> weatherObject
     const WX = new Map();
-const WX_META = { ok:0, ng:0, cacheHit:0, lastErr:"" };
+    const WX_META = { ok:0, ng:0, cacheHit:0, lastErr:"" };
+    const WX_INFLIGHT = new Map(); // key -> Promise
+    const WX_FAIL = new Map(); // key -> retryAfter(timestamp ms)
 
-// 失敗を null で固定キャッシュしない（=以後取りに行かなくなる事故防止）
-// ただし無限リトライで429を誘発しないよう、山ごとに短時間だけ再試行を抑制する
-const WX_FAIL_NEXT = new Map(); // key -> nextAt(ms)
+    async function ensureWeatherFor(m){
+      const key = normName(m.name);
+      if (WX.has(key)) { WX_META.cacheHit++; return WX.get(key); }
+      const now = Date.now();
+      const retryAfter = WX_FAIL.get(key) || 0;
+      if (now < retryAfter) return null; // クールダウン中
+      if (WX_INFLIGHT.has(key)) return WX_INFLIGHT.get(key);
 
-async function ensureWeatherFor(m){
-  const key = normName(m.name);
+      const p = (async () => {
+        try{
+          const w = await generateWeatherScore(m.name, m.lat, m.lng, m.level || "中級", m.elev ?? null);
+          WX.set(key, w);
+          WX_META.ok++;
+          return w;
+        }catch(e){
+          WX_META.ng++;
+          WX_META.lastErr = String(e?.message || e);
+          // 失敗を null で固定キャッシュしない。短時間待って再チャレンジ可能にする。
+          WX_FAIL.set(key, Date.now() + 30_000);
+          return null;
+        }finally{
+          WX_INFLIGHT.delete(key);
+        }
+      })();
 
-  // 成功キャッシュがあれば返す
-  const cached = WX.get(key);
-  if (cached) return cached;
-
-  // 直近失敗後のクールダウン中はスキップ
-  const nextAt = WX_FAIL_NEXT.get(key) || 0;
-  if (Date.now() < nextAt) return null;
-
-  try{
-    const w = await generateWeatherScore(m.name, m.lat, m.lng, m.level || "中級", m.elev ?? null);
-    if (w){
-      WX.set(key, w);
-      WX_META.ok++;
-      return w;
+      WX_INFLIGHT.set(key, p);
+      return p;
     }
-    return null;
-  }catch(e){
-    WX_META.ng++;
-    WX_META.lastErr = String(e?.message || e);
-    // 30秒クールダウン（429/ネット不安定で連打しない）
-    WX_FAIL_NEXT.set(key, Date.now() + 30_000);
-    return null;
-  }
-}
 
     function scoreAt(m, dateKey, timeSlot){
       const w = WX.get(normName(m.name));
@@ -454,6 +430,31 @@ async function ensureWeatherFor(m){
       return "";
     }
 
+    function scoreTableHtml(m){
+      const w = WX.get(normName(m.name));
+      if (!w) return `<div class="p" style="color:var(--muted)">天気未取得</div>`;
+
+      const days = [0,1,2,3];
+      const cols = days.map(d => ({ key: getDateKey(d), label: dayLabel(d) }));
+
+      const head = `<tr><th>時間</th>` + cols.map(c=>`<th>${escapeHtml(c.label)}</th>`).join("") + `</tr>`;
+      const body = timeSlots.map((ts, i) => {
+        const rowLabel = timeLabels[i] || ts;
+        const tds = cols.map(c => {
+          const sc = (w?.[c.key]?.[ts]) || "—";
+          const cls = scoreClass(sc);
+          return `<td class="${cls}">${escapeHtml(sc)}</td>`;
+        }).join("");
+        return `<tr><td class="k">${escapeHtml(rowLabel)}</td>${tds}</tr>`;
+      }).join("");
+
+      return `
+        <div class="p" style="margin-top:8px">天気スコア表（今日〜3日後）</div>
+        <div class="wxTableWrap"><table class="wxScoreTable">${head}${body}</table></div>
+      `;
+    }
+
+
     function popupHtml(m){
       const dateKey = getDateKey(getDateOffset());
       const timeSlot = getSelectedTimeSlot();
@@ -479,9 +480,30 @@ async function ensureWeatherFor(m){
             <div class="wxrow"><div class="k">突風</div><div>${d?.gust ?? "—"} m/s</div></div>
             <div class="wxrow"><div class="k">気温</div><div>${d?.temp ?? "—"} ℃</div></div>
           </div>
+          ${scoreTableHtml(m)}
         </div>
       `;
     }
+
+    /* ========= full-screen overlay (pin click) ========= */
+    const mountOverlay = document.getElementById("mountOverlay");
+    const mountOverlayTitle = document.getElementById("mountOverlayTitle");
+    const mountOverlayContent = document.getElementById("mountOverlayContent");
+    const mountOverlayClose = document.getElementById("mountOverlayClose");
+
+    function openMountainOverlay(m){
+      mountOverlayTitle.textContent = m.name;
+      mountOverlayContent.innerHTML = popupHtml(m);
+      mountOverlay.style.display = "block";
+      mountOverlay.setAttribute("aria-hidden","false");
+    }
+    function closeMountainOverlay(){
+      mountOverlay.style.display = "none";
+      mountOverlay.setAttribute("aria-hidden","true");
+    }
+    mountOverlayClose.addEventListener("click", closeMountainOverlay);
+    mountOverlay.addEventListener("click", (e)=>{ if (e.target === mountOverlay) closeMountainOverlay(); });
+
 
     /* ========= draw ========= */
     const listEl = document.getElementById("list");
@@ -589,14 +611,14 @@ async function ensureWeatherFor(m){
           const mk = MARKERS.get(normName(m.name));
           if (mk){
             mapObj.setView([m.lat, m.lng], Math.max(mapObj.getZoom(), 9), { animate:true });
-            openMountainOverlay(m);
+            mk.openPopup();
           }
         });
         listEl.appendChild(item);
 
         // marker
         const marker = L.marker([m.lat, m.lng], { icon: ICONS.N });
-        marker.bindPopup(popupHtml(m), { maxWidth: 360 });
+        marker.on("click", () => openMountainOverlay(m));
         marker.addTo(markerLayer);
         MARKERS.set(normName(m.name), marker);
       }
@@ -604,77 +626,51 @@ async function ensureWeatherFor(m){
       refreshStatusUI([`表示: ${vis.length}件（${escapeHtml(dayLabel(getDateOffset()))} ${escapeHtml(timeSlot)}）`]);
 
       // ✅ “画面を動かさないと天気が来ない”対策：描画のたびに先読みを走らせる
-      PREFETCH_TOKEN++;
-      prefetchWeather(vis, PREFETCH_TOKEN);
+      prefetchWeather(vis);
     }
 
-/* ========= auto prefetch (rate limited) ========= */
-let PREFETCH_RUNNING = false;
-let PREFETCH_TOKEN = 0;
+    /* ========= auto prefetch (rate limited) ========= */
+    let PREFETCH_RUNNING = false;
 
-const loadingOverlay = document.getElementById("loadingOverlay");
-const loadingSub = document.getElementById("loadingSub");
-function showLoading(msg){
-  if (!loadingOverlay) return;
-  if (loadingSub && msg) loadingSub.textContent = msg;
-  loadingOverlay.style.display = "flex";
-  loadingOverlay.setAttribute("aria-hidden","false");
-}
-function hideLoading(){
-  if (!loadingOverlay) return;
-  loadingOverlay.style.display = "none";
-  loadingOverlay.setAttribute("aria-hidden","true");
-}
+    async function prefetchWeather(list){
+      if (PREFETCH_RUNNING) return;
+      PREFETCH_RUNNING = true;
 
-    async function prefetchWeather(list, token){
-  if (PREFETCH_RUNNING) return;
-  PREFETCH_RUNNING = true;
-      showLoading("天気を取得中です");
+      try{
+        // 一気に投げると 429 になるので、少数並列 + 待ち
+        const concurrency = 3;
+        const queue = list.filter(m => { const k = normName(m.name); return !WX.has(k) && !WX_INFLIGHT.has(k) && (Date.now() >= (WX_FAIL.get(k) || 0)); });
+        let idx = 0;
 
-  try{
-    showLoading("天気を取得中です（操作できません）");
+        async function worker(){
+          while (idx < queue.length){
+            const m = queue[idx++];
+            await ensureWeatherFor(m);
 
-    // 一気に投げると 429 になるので、少数並列 + 待ち
-    const concurrency = 3;
-    const queue = list.slice(); // 表示中はすべて対象（60件制限は撤廃）
-    let idx = 0;
+            // marker色更新
+            const dateKey = getDateKey(getDateOffset());
+            const timeSlot = getSelectedTimeSlot();
+            const sc = scoreAt(m, dateKey, timeSlot);
+            const mk = MARKERS.get(normName(m.name));
+            if (mk){
+              mk.setIcon(ICONS[sc] || ICONS.N);
+              mk.setPopupContent(popupHtml(m));
+            }
 
-    async function worker(){
-      while (idx < queue.length){
-        if (token !== PREFETCH_TOKEN) return; // drawで更新されたら中断
-        const m = queue[idx++];
-
-        await ensureWeatherFor(m);
-
-        // marker色更新 + popup更新
-        const dateKey = getDateKey(getDateOffset());
-        const timeSlot = getSelectedTimeSlot();
-        const sc = scoreAt(m, dateKey, timeSlot);
-        const mk = MARKERS.get(normName(m.name));
-        if (mk){
-          mk.setIcon(ICONS[sc] || ICONS.N);
-          mk.setPopupContent(popupHtml(m));
+            refreshStatusUI([`天気先読み中... ${Math.min(idx, queue.length)}/${queue.length}`]);
+            await new Promise(r => setTimeout(r, 120)); // 軽く間引き
+          }
         }
 
-        refreshStatusUI([`天気先読み中... ${Math.min(idx, queue.length)}/${queue.length}`]);
-        await new Promise(r => setTimeout(r, 120)); // 軽く間引き
+        await Promise.all(Array.from({length:concurrency}, worker));
+        refreshStatusUI([`天気先読み完了（表示中 上位${Math.min(queue.length, list.length)}件）`]);
+
+      }finally{
+        PREFETCH_RUNNING = false;
       }
     }
 
-    await Promise.all(Array.from({length:concurrency}, worker));
-
-    if (token === PREFETCH_TOKEN){
-      refreshStatusUI([`天気先読み完了（表示中 ${queue.length}件）`]);
-    }
-
-  }finally{
-    hideLoading();
-    PREFETCH_RUNNING = false;
-      hideLoading();
-  }
-}
-
-/* ========= events ========= */
+    /* ========= events ========= */
     document.querySelectorAll('#control input[type="checkbox"]').forEach(el=>{
       el.addEventListener("change", draw);
     });
@@ -684,5 +680,14 @@ function hideLoading(){
     timeLabel.textContent = timeLabels[Number(slider.value)];
     draw();
   </script>
+  <div id="mountOverlay" aria-hidden="true">
+    <div class="box" role="dialog" aria-modal="true">
+      <div class="head">
+        <div id="mountOverlayTitle" style="font-weight:700"></div>
+        <button id="mountOverlayClose" class="closeBtn" type="button">閉じる</button>
+      </div>
+      <div id="mountOverlayContent" class="content"></div>
+    </div>
+  </div>
 </body>
 </html>
