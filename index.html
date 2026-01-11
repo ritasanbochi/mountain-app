@@ -701,12 +701,11 @@
             const mk = MARKERS.get(normName(m.name));
             if (mk){
               mk.setIcon(ICONS[sc] || ICONS.N);
+            }
             // オーバーレイ表示中の山なら中身も更新
             if (mountainOverlay && mountainOverlay.style.display === "block" && mountainOverlayTitle?.textContent === m.name){
               mountainOverlayBody.innerHTML = popupHtml(m);
             }
-
-}
 
             refreshStatusUI([`天気先読み中... ${Math.min(idx, queue.length)}/${queue.length}`]);
             await new Promise(r => setTimeout(r, 120)); // 軽く間引き
