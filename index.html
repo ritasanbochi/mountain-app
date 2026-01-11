@@ -263,6 +263,9 @@
         <label class="cb" style="min-width:170px;"><span>花の百名山</span><input type="checkbox" id="setHANA"></label>
         <label class="cb" style="min-width:170px;"><span>二百名山</span><input type="checkbox" id="setN200"></label>
         <span class="chip" id="countChip">読込中...</span>
+        <button id="refreshWeather"
+          style="padding:6px 12px; border:1px solid var(--line); background:#fff; border-radius:8px; cursor:pointer; font-size:13px;">🔄
+          天気を再取得</button>
       </div>
     </div>
 
@@ -765,7 +768,9 @@
         listEl.appendChild(item);
 
         // marker
-        const marker = L.marker([m.lat, m.lng], { icon: ICONS.N });
+        const weatherScore = scoreAt(m, dateKey, timeSlot);
+        const markerIcon = ICONS[weatherScore] || ICONS.N;
+        const marker = L.marker([m.lat, m.lng], { icon: markerIcon });
         marker.on("click", () => openMountainOverlay(m));
         marker.addTo(markerLayer);
         MARKERS.set(normName(m.name), marker);
@@ -830,6 +835,19 @@
     /* ========= events ========= */
     document.querySelectorAll('#control input[type="checkbox"]').forEach(el => {
       el.addEventListener("change", draw);
+    });
+
+    // 天気再取得ボタン
+    document.getElementById("refreshWeather")?.addEventListener("click", () => {
+      // キャッシュをクリア
+      WX.clear();
+      WX_FAIL.clear();
+      WX_META.ok = 0;
+      WX_META.ng = 0;
+      WX_META.cacheHit = 0;
+      WX_META.lastErr = "";
+      // 再描画（自動的に天気を再取得）
+      draw();
     });
 
     // init
