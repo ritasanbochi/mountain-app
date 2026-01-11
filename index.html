@@ -157,10 +157,9 @@
 
       <div class="seg">
         <b>表示セット</b>
-        <!-- 初期値は百名山のみON（429対策：初回の同時取得量を抑える） -->
         <label class="cb" style="min-width:170px;"><span>百名山</span><input type="checkbox" id="setHYAKU" checked></label>
-        <label class="cb" style="min-width:170px;"><span>花の百名山</span><input type="checkbox" id="setHANA"></label>
-        <label class="cb" style="min-width:170px;"><span>二百名山</span><input type="checkbox" id="setN200"></label>
+        <label class="cb" style="min-width:170px;"><span>花の百名山</span><input type="checkbox" id="setHANA" checked></label>
+        <label class="cb" style="min-width:170px;"><span>二百名山</span><input type="checkbox" id="setN200" checked></label>
         <span class="chip" id="countChip">読込中...</span>
       </div>
     </div>
@@ -353,30 +352,20 @@
     /* ========= weather cache in memory ========= */
     // mountainKey -> weatherObject
     const WX = new Map();
-    // mountainKey -> lastFailAt(ms)
-    const WX_FAIL = new Map();
     const WX_META = { ok:0, ng:0, cacheHit:0, lastErr:"" };
 
     async function ensureWeatherFor(m){
       const key = normName(m.name);
-      if (WX.has(key)){
-        WX_META.cacheHit++;
-        return WX.get(key);
-      }
-
-      // 失敗直後の連打を抑制（429悪化防止）。ダミー/失敗結果はキャッシュしない。
-      const lastFailAt = WX_FAIL.get(key);
-      if (lastFailAt && (Date.now() - lastFailAt) < 30_000) return null;
+      if (WX.has(key)) return WX.get(key);
 
       try{
-        // generateWeatherScore の返り値は weather[dateKey][time] と weather.__detail が前提
+        // generateWeatherScore の返り値は weather[dateKey][time] と weather.__detail が前提 :contentReference[oaicite:1]{index=1}
         const w = await generateWeatherScore(m.name, m.lat, m.lng, m.level || "中級", m.elev ?? null);
         WX.set(key, w);
-        WX_FAIL.delete(key);
         WX_META.ok++;
         return w;
       }catch(e){
-        WX_FAIL.set(key, Date.now());
+        WX.set(key, null);
         WX_META.ng++;
         WX_META.lastErr = String(e?.message || e);
         return null;
@@ -508,8 +497,6 @@
     }
 
     function draw(){
-      // prefetch中に描画が走るとマーカーが差し替わるため、世代を進めて旧prefetchを中断させる
-      PREFETCH_GEN++;
       refreshCountsUI();
 
       // marker update
@@ -573,37 +560,32 @@
       prefetchWeather(vis);
     }
 
-    /* ========= auto prefetch (rate limited) ========= */
-    let PREFETCH_RUNNING = false;
-    let PREFETCH_PENDING_LIST = null;
-    let PREFETCH_GEN = 0;
 
-    function setSetControlsDisabled(disabled){
-      // 表示セットの変更で一気に取得が膨らむので、取得中はセットだけロック
-      [setHYAKU, setHANA, setN200].forEach(el => { if (el) el.disabled = disabled; });
+    const loadingOverlay = document.getElementById("loadingOverlay");
+    const loadingOverlaySub = document.getElementById("loadingOverlaySub");
+
+    function setLoadingOverlay(on, subText){
+      if (!loadingOverlay) return;
+      if (loadingOverlaySub && typeof subText === "string") loadingOverlaySub.textContent = subText;
+      loadingOverlay.style.display = on ? "flex" : "none";
     }
 
-    async function prefetchWeather(list){
-      // 取得中にdraw()が走るとマーカー/DOMが差し替わるので、世代でキャンセルする
-      const myGen = PREFETCH_GEN;
 
-      if (PREFETCH_RUNNING){
-        // 最新の「見えているリスト」を後で取りに行く
-        PREFETCH_PENDING_LIST = list;
-        return;
-      }
+    /* ========= auto prefetch (rate limited) ========= */
+    let PREFETCH_RUNNING = false;
+
+    async function prefetchWeather(list){
+      if (PREFETCH_RUNNING) return;
       PREFETCH_RUNNING = true;
-      setSetControlsDisabled(true);
 
       try{
         // 一気に投げると 429 になるので、少数並列 + 待ち
         const concurrency = 3;
-        const queue = list.slice(0, 60); // まずは見えてる上位から（体感優先）
+        const queue = list.slice(); // 表示中の対象を順次取得（429回避のため少数並列＋待ち）
         let idx = 0;
 
         async function worker(){
           while (idx < queue.length){
-            if (myGen !== PREFETCH_GEN) break; // draw()が走ったら中断
             const m = queue[idx++];
             await ensureWeatherFor(m);
 
@@ -623,19 +605,10 @@
         }
 
         await Promise.all(Array.from({length:concurrency}, worker));
-        refreshStatusUI([`天気先読み完了（表示中 上位${Math.min(queue.length, list.length)}件）`]);
+        refreshStatusUI([`天気先読み完了（表示中 ${list.length}件）`]);
 
       }finally{
         PREFETCH_RUNNING = false;
-        setSetControlsDisabled(false);
-
-        // 取得中に最新の表示条件へ切り替わっていたら、終了後にもう一度だけ回す
-        if (PREFETCH_PENDING_LIST){
-          const next = PREFETCH_PENDING_LIST;
-          PREFETCH_PENDING_LIST = null;
-          // 次の世代として実行
-          await prefetchWeather(next);
-        }
       }
     }
 
@@ -649,5 +622,28 @@
     timeLabel.textContent = timeLabels[Number(slider.value)];
     draw();
   </script>
+
+  <div id="loadingOverlay" style="
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.25);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+  ">
+    <div style="
+      background: rgba(255,255,255,0.95);
+      border-radius: 12px;
+      padding: 14px 16px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+      font-size: 14px;
+      line-height: 1.4;
+    ">
+      <div style="font-weight: 700; margin-bottom: 6px;">NowLoading...</div>
+      <div id="loadingOverlaySub" style="opacity: 0.85;">天気情報を取得中</div>
+    </div>
+  </div>
+
 </body>
 </html>
