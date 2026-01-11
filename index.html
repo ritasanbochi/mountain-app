@@ -117,16 +117,6 @@
       #list{ width:auto; max-height: 38vh; border-right:none; border-bottom:1px solid var(--line); }
       #map{ height: calc(100vh - 64px - 38vh); }
     }
-    /* ===== overlay & score table (minimal) ===== */
-    #mountOverlay{ position:fixed; inset:0; display:none; z-index:9999; background:rgba(0,0,0,.45); }
-    #mountOverlay .box{ position:absolute; inset:12px; background:#fff; border-radius:12px; overflow:auto; box-shadow:0 10px 30px rgba(0,0,0,.25); }
-    #mountOverlay .head{ position:sticky; top:0; background:#fff; border-bottom:1px solid var(--line); padding:10px 12px; display:flex; justify-content:space-between; align-items:center; }
-    #mountOverlay .closeBtn{ border:1px solid var(--line); background:#fff; border-radius:10px; padding:6px 10px; cursor:pointer; }
-    #mountOverlay .content{ padding:12px; }
-    .wxTableWrap{ overflow:auto; border:1px solid var(--line); border-radius:10px; }
-    table.wxScoreTable{ border-collapse:collapse; width:max-content; min-width:100%; font-size:12px; }
-    .wxScoreTable th, .wxScoreTable td{ border-bottom:1px solid var(--line); border-right:1px solid var(--line); padding:6px 8px; text-align:center; }
-    .wxScoreTable th:first-child, .wxScoreTable td:first-child{ position:sticky; left:0; background:#fff; text-align:left; }
   </style>
 </head>
 
@@ -168,8 +158,8 @@
       <div class="seg">
         <b>表示セット</b>
         <label class="cb" style="min-width:170px;"><span>百名山</span><input type="checkbox" id="setHYAKU" checked></label>
-        <label class="cb" style="min-width:170px;"><span>花の百名山</span><input type="checkbox" id="setHANA" checked></label>
-        <label class="cb" style="min-width:170px;"><span>二百名山</span><input type="checkbox" id="setN200" checked></label>
+        <label class="cb" style="min-width:170px;"><span>花の百名山</span><input type="checkbox" id="setHANA"></label>
+        <label class="cb" style="min-width:170px;"><span>二百名山</span><input type="checkbox" id="setN200"></label>
         <span class="chip" id="countChip">読込中...</span>
       </div>
     </div>
@@ -180,6 +170,23 @@
   <div id="container">
     <div id="list"></div>
     <div id="map"></div>
+  </div>
+
+  
+  <!-- Fullscreen overlay for mountain details (kept hidden; shown on pin click) -->
+  <div id="mountainOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:9999;">
+    <div style="position:absolute; inset:16px; background:#fff; border-radius:12px; overflow:auto; box-shadow:0 10px 30px rgba(0,0,0,.25);">
+      <div style="position:sticky; top:0; display:flex; gap:8px; align-items:center; justify-content:space-between; padding:12px 12px; border-bottom:1px solid #e7e7e7; background:#fff;">
+        <div id="mountainOverlayTitle" style="font-weight:700;"></div>
+        <button id="mountainOverlayClose" style="border:1px solid #ddd; background:#fff; border-radius:10px; padding:6px 10px; cursor:pointer;">閉じる</button>
+      </div>
+      <div id="mountainOverlayBody" style="padding:12px 12px;"></div>
+    </div>
+  </div>
+
+  <!-- Loading overlay (blocks UI only while fetching) -->
+  <div id="loadingOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:9998; align-items:center; justify-content:center;">
+    <div style="background:#fff; padding:14px 16px; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.25); font-weight:700;">NowLoading…</div>
   </div>
 
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
@@ -363,15 +370,22 @@
     // mountainKey -> weatherObject
     const WX = new Map();
     const WX_META = { ok:0, ng:0, cacheHit:0, lastErr:"" };
+
     const WX_INFLIGHT = new Map(); // key -> Promise
-    const WX_FAIL = new Map(); // key -> retryAfter(timestamp ms)
+    const WX_FAIL = new Map(); // key -> retryAfter(ms)
+
 
     async function ensureWeatherFor(m){
       const key = normName(m.name);
-      if (WX.has(key)) { WX_META.cacheHit++; return WX.get(key); }
+
+      // 取得済みは即返す（チェックON/OFFで灰色に戻さない）
+      if (WX.has(key)) { WX_META.cacheHit = (WX_META.cacheHit||0) + 1; return WX.get(key); }
+
       const now = Date.now();
       const retryAfter = WX_FAIL.get(key) || 0;
       if (now < retryAfter) return null; // クールダウン中
+
+      // 同一キーの同時取得を束ねる
       if (WX_INFLIGHT.has(key)) return WX_INFLIGHT.get(key);
 
       const p = (async () => {
@@ -383,7 +397,7 @@
         }catch(e){
           WX_META.ng++;
           WX_META.lastErr = String(e?.message || e);
-          // 失敗を null で固定キャッシュしない。短時間待って再チャレンジ可能にする。
+          // 失敗を null で固定キャッシュしない（以後も取得できなくなるのを防ぐ）
           WX_FAIL.set(key, Date.now() + 30_000);
           return null;
         }finally{
@@ -393,6 +407,8 @@
 
       WX_INFLIGHT.set(key, p);
       return p;
+    }
+
     }
 
     function scoreAt(m, dateKey, timeSlot){
@@ -430,14 +446,15 @@
       return "";
     }
 
+
     function scoreTableHtml(m){
       const w = WX.get(normName(m.name));
       if (!w) return `<div class="p" style="color:var(--muted)">天気未取得</div>`;
 
       const days = [0,1,2,3];
       const cols = days.map(d => ({ key: getDateKey(d), label: dayLabel(d) }));
-
       const head = `<tr><th>時間</th>` + cols.map(c=>`<th>${escapeHtml(c.label)}</th>`).join("") + `</tr>`;
+
       const body = timeSlots.map((ts, i) => {
         const rowLabel = timeLabels[i] || ts;
         const tds = cols.map(c => {
@@ -454,12 +471,25 @@
       `;
     }
 
-
     function popupHtml(m){
-      const dateKey = getDateKey(getDateOffset());
-      const timeSlot = getSelectedTimeSlot();
-      const s = scoreAt(m, dateKey, timeSlot) || "—";
-      const d = detailAt(m, dateKey, timeSlot);
+      const dateOffset = getDateOffset();
+      const dateKey = getDateKey(dateOffset);
+
+      // 選択日の「各時間帯」詳細を出す（必須仕様）
+      const w = WX.get(normName(m.name));
+      const detailRows = timeSlots.map((ts, i) => {
+        const rowLabel = timeLabels[i] || ts;
+        const d = w?.__detail?.[dateKey]?.[ts] || null;
+        return `
+          <tr>
+            <td class="k">${escapeHtml(rowLabel)}</td>
+            <td>${d?.precip ?? "—"}</td>
+            <td>${d?.wind ?? "—"}</td>
+            <td>${d?.gust ?? "—"}</td>
+            <td>${d?.temp ?? "—"}</td>
+          </tr>
+        `;
+      }).join("");
 
       const sets = (m._sets||[]).map(x=>{
         if (x==="HYAKU") return "百";
@@ -473,50 +503,62 @@
           <h3>${escapeHtml(m.name)}</h3>
           <div class="p">標高: ${m.elev ?? "?"}m　/　難易度: ${escapeHtml(m.level ?? "中級")}</div>
           <div class="p">セット: ${escapeHtml(sets || "-")}</div>
-          <div class="p">天気スコア: <span class="${scoreClass(s)}">${escapeHtml(s)}</span>（${escapeHtml(dayLabel(getDateOffset()))} ${escapeHtml(timeSlot)}）</div>
-          <div class="wxgrid">
-            <div class="wxrow"><div class="k">降水</div><div>${d?.precip ?? "—"} mm</div></div>
-            <div class="wxrow"><div class="k">風</div><div>${d?.wind ?? "—"} m/s</div></div>
-            <div class="wxrow"><div class="k">突風</div><div>${d?.gust ?? "—"} m/s</div></div>
-            <div class="wxrow"><div class="k">気温</div><div>${d?.temp ?? "—"} ℃</div></div>
+
+          <div class="p" style="margin-top:8px">詳細（${escapeHtml(dayLabel(dateOffset))} / 各時間帯）</div>
+          <div class="wxTableWrap">
+            <table class="wxScoreTable">
+              <tr><th>時間</th><th>降水(mm)</th><th>風(m/s)</th><th>突風(m/s)</th><th>気温(℃)</th></tr>
+              ${detailRows}
+            </table>
           </div>
+
           ${scoreTableHtml(m)}
         </div>
       `;
     }
 
-    /* ========= full-screen overlay (pin click) ========= */
-    const mountOverlay = document.getElementById("mountOverlay");
-    const mountOverlayTitle = document.getElementById("mountOverlayTitle");
-    const mountOverlayContent = document.getElementById("mountOverlayContent");
-    const mountOverlayClose = document.getElementById("mountOverlayClose");
+
+    const mountainOverlay = document.getElementById("mountainOverlay");
+    const mountainOverlayTitle = document.getElementById("mountainOverlayTitle");
+    const mountainOverlayBody  = document.getElementById("mountainOverlayBody");
+    const mountainOverlayClose = document.getElementById("mountainOverlayClose");
 
     function openMountainOverlay(m){
-      mountOverlayTitle.textContent = m.name;
-      mountOverlayContent.innerHTML = popupHtml(m);
-      mountOverlay.style.display = "block";
-      mountOverlay.setAttribute("aria-hidden","false");
+      mountainOverlayTitle.textContent = m.name || "";
+      mountainOverlayBody.innerHTML = popupHtml(m);
+      mountainOverlay.style.display = "block";
     }
     function closeMountainOverlay(){
-      mountOverlay.style.display = "none";
-      mountOverlay.setAttribute("aria-hidden","true");
+      mountainOverlay.style.display = "none";
     }
-    mountOverlayClose.addEventListener("click", closeMountainOverlay);
-    mountOverlay.addEventListener("click", (e)=>{ if (e.target === mountOverlay) closeMountainOverlay(); });
+    mountainOverlayClose?.addEventListener("click", closeMountainOverlay);
+    mountainOverlay?.addEventListener("click", (e)=>{
+      if (e.target === mountainOverlay) closeMountainOverlay();
+    });
+
+    const loadingOverlay = document.getElementById("loadingOverlay");
+    function showLoading(){
+      if (loadingOverlay) loadingOverlay.style.display = "flex";
+    }
+    function hideLoading(){
+      if (loadingOverlay) loadingOverlay.style.display = "none";
+    }
 
 
     /* ========= draw ========= */
     const listEl = document.getElementById("list");
 
     function computeCounts(){
-      let hy=0, ha=0, n2=0;
+      let hy=0, ha=0, n2=0, all=0;
       for (const m of ALL){
+        if (m?.lat == null || m?.lng == null) continue;
+        all++;
         const s = m._sets || [];
         if (s.includes("HYAKU")) hy++;
         if (s.includes("HANA_100")) ha++;
         if (s.includes("NIHON_200")) n2++;
       }
-      return { hy, ha, n2, total: ALL.length };
+      return { hy, ha, n2, total: all };
     }
 
     function visibleMountains(){
@@ -553,7 +595,7 @@
 
     function refreshCountsUI(){
       const c = computeCounts();
-      countChip.textContent = `登録: 百=${c.hy} / 花=${c.ha} / 200=${c.n2}`;
+      countChip.textContent = `登録(座標あり): 百=${c.hy} / 花=${c.ha} / 200=${c.n2}`;
     }
 
     function refreshStatusUI(extraLines=[]){
@@ -618,7 +660,7 @@
 
         // marker
         const marker = L.marker([m.lat, m.lng], { icon: ICONS.N });
-        marker.on("click", () => openMountainOverlay(m));
+                marker.on("click", () => openMountainOverlay(m));
         marker.addTo(markerLayer);
         MARKERS.set(normName(m.name), marker);
       }
@@ -635,11 +677,16 @@
     async function prefetchWeather(list){
       if (PREFETCH_RUNNING) return;
       PREFETCH_RUNNING = true;
+      showLoading();
 
       try{
         // 一気に投げると 429 になるので、少数並列 + 待ち
         const concurrency = 3;
-        const queue = list.filter(m => { const k = normName(m.name); return !WX.has(k) && !WX_INFLIGHT.has(k) && (Date.now() >= (WX_FAIL.get(k) || 0)); });
+        const queue = list.filter(m => {
+          const k = normName(m.name);
+          const retryAfter = WX_FAIL.get(k) || 0;
+          return !WX.has(k) && !WX_INFLIGHT.has(k) && Date.now() >= retryAfter;
+        });
         let idx = 0;
 
         async function worker(){
@@ -654,8 +701,12 @@
             const mk = MARKERS.get(normName(m.name));
             if (mk){
               mk.setIcon(ICONS[sc] || ICONS.N);
-              mk.setPopupContent(popupHtml(m));
+            // オーバーレイ表示中の山なら中身も更新
+            if (mountainOverlay && mountainOverlay.style.display === "block" && mountainOverlayTitle?.textContent === m.name){
+              mountainOverlayBody.innerHTML = popupHtml(m);
             }
+
+}
 
             refreshStatusUI([`天気先読み中... ${Math.min(idx, queue.length)}/${queue.length}`]);
             await new Promise(r => setTimeout(r, 120)); // 軽く間引き
@@ -663,10 +714,11 @@
         }
 
         await Promise.all(Array.from({length:concurrency}, worker));
-        refreshStatusUI([`天気先読み完了（表示中 上位${Math.min(queue.length, list.length)}件）`]);
+        refreshStatusUI([`天気先読み完了（未取得対象 ${queue.length}件 / 表示中 ${list.length}件）`]);
 
       }finally{
         PREFETCH_RUNNING = false;
+        hideLoading();
       }
     }
 
@@ -680,14 +732,5 @@
     timeLabel.textContent = timeLabels[Number(slider.value)];
     draw();
   </script>
-  <div id="mountOverlay" aria-hidden="true">
-    <div class="box" role="dialog" aria-modal="true">
-      <div class="head">
-        <div id="mountOverlayTitle" style="font-weight:700"></div>
-        <button id="mountOverlayClose" class="closeBtn" type="button">閉じる</button>
-      </div>
-      <div id="mountOverlayContent" class="content"></div>
-    </div>
-  </div>
 </body>
 </html>

@@ -10,7 +10,7 @@ const mountainsExtra = [
   { name:"ニペソツ山", lat:43.4558, lng:143.0322, elev:2013, level:"上級", gpx:null, weather:{}, _sets:["NIHON_200"] },
   { name:"ピンネシリ", lat:null, lng:null, elev:null, level:"中級", gpx:null, weather:{}, _sets:["NIHON_200"] },
   { name:"三ツ峠山", lat:35.5231, lng:138.8097, elev:1785, level:"中級", gpx:null, weather:{}, _sets:["NIHON_200"] },
-  { name:"三瓶山", lat:null, lng:null, elev:null, level:"中級", gpx:null, weather:{}, _sets:["HANA_100"] },
+{ name:"三瓶山", lat:35.140528, lng:132.621528, elev:1126, level:"中級", gpx:null, weather:{}, _sets:["HANA_100","NIHON_200"] },
   { name:"両神山", lat:36.023, lng:138.841, elev:1723, level:"中級", gpx:null, weather:{}, _sets:["NIHON_200"] },
   { name:"丹沢山", lat:35.474, lng:139.162, elev:1567, level:"中級", gpx:null, weather:{}, _sets:["HANA_100", "NIHON_200"] },
   { name:"乙妻山", lat:null, lng:null, elev:null, level:"中級", gpx:null, weather:{}, _sets:["NIHON_200"] },
@@ -80,7 +80,7 @@ const mountainsExtra = [
   { name:"武尊山", lat:36.793, lng:139.133, elev:2158, level:"中級", gpx:null, weather:{}, _sets:["NIHON_200"] },
   { name:"比叡山", lat:null, lng:null, elev:null, level:"中級", gpx:null, weather:{}, _sets:["HANA_100"] },
   { name:"毛無山", lat:null, lng:null, elev:null, level:"中級", gpx:null, weather:{}, _sets:["NIHON_200"] },
-  { name:"氷ノ山", lat:null, lng:null, elev:null, level:"中級", gpx:null, weather:{}, _sets:["HANA_100"] },
+{ name:"氷ノ山", lat:35.35389, lng:134.51361, elev:1510, level:"中級", gpx:null, weather:{}, _sets:["HANA_100","NIHON_200"] },
   { name:"泉ヶ岳", lat:null, lng:null, elev:null, level:"中級", gpx:null, weather:{}, _sets:["NIHON_200"] },
   { name:"浅草岳", lat:null, lng:null, elev:null, level:"中級", gpx:null, weather:{}, _sets:["NIHON_200"] },
   { name:"浅間山", lat:36.406, lng:138.523, elev:2568, level:"中級", gpx:null, weather:{}, _sets:["NIHON_200"] },
@@ -160,6 +160,9 @@ const mountainsExtra = [
   { name:"黒姫山", lat:36.8106, lng:138.1261, elev:2053, level:"上級", gpx:null, weather:{}, _sets:["NIHON_200"] },
   { name:"黒部五郎岳", lat:36.388, lng:137.603, elev:2840, level:"上級", gpx:null, weather:{}, _sets:["HANA_100"] },
   
+  { name:"上蒜山", lat:35.32500, lng:133.66361, elev:1202, level:"中級", gpx:null, weather:{}, _sets:["NIHON_200"] },
+  { name:"船通山", lat:35.15583, lng:133.17861, elev:1142, level:"中級", gpx:null, weather:{}, _sets:["NIHON_200"] },
+  { name:"道後山", lat:35.0623, lng:133.2107, elev:1271, level:"中級", gpx:null, weather:{}, _sets:["NIHON_200"] },
 ];
 // 追加: 未確認だった座標の確定分（ChatGPT側で再チェック済み）
 export const EXTRA_COORDS_FIXED = [
