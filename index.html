@@ -1,29 +1,39 @@
 <!DOCTYPE html>
 <html lang="ja">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>登山向け山岳マップ</title>
 
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
 
   <style>
-    :root{
-      --panel-bg:#f3f3f3;
-      --card:#fff;
-      --line:#ddd;
-      --muted:#666;
-      --chip:#eef2ff;
-      --chip-text:#2b3a67;
+    :root {
+      --panel-bg: #f3f3f3;
+      --card: #fff;
+      --line: #ddd;
+      --muted: #666;
+      --chip: #eef2ff;
+      --chip-text: #2b3a67;
     }
-    body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
     #control {
-      padding:10px;
-      background:var(--panel-bg);
-      font-size:14px;
-      border-bottom:1px solid var(--line);
+      padding: 10px;
+      background: var(--panel-bg);
+      font-size: 14px;
+      border-bottom: 1px solid var(--line);
     }
-    #container { display:flex; }
+
+    #container {
+      display: flex;
+    }
+
     #list {
       width: 320px;
       max-height: calc(100vh - 64px);
@@ -33,89 +43,181 @@
       padding: 8px;
       font-size: 13px;
     }
-    #map { flex:1; height: calc(100vh - 64px); }
 
-    .row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-    .row + .row { margin-top:8px; }
+    #map {
+      flex: 1;
+      height: calc(100vh - 64px);
+    }
 
-    .seg { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    .seg b { margin-right:6px; }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .row+.row {
+      margin-top: 8px;
+    }
+
+    .seg {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .seg b {
+      margin-right: 6px;
+    }
 
     /* ✅ チェックが左に寄る崩れを防ぐ（テキスト左、チェック右を固定） */
     .cb {
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:10px;
-      padding:4px 8px;
-      background:#fff;
-      border:1px solid var(--line);
-      border-radius:8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 4px 8px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
       min-width: 92px;
-      user-select:none;
+      user-select: none;
     }
-    .cb span { color:#111; }
-    .cb input { margin:0; }
+
+    .cb span {
+      color: #111;
+    }
+
+    .cb input {
+      margin: 0;
+    }
 
     .chip {
-      display:inline-block;
-      padding:4px 8px;
-      border-radius:999px;
-      background:var(--chip);
-      color:var(--chip-text);
-      border:1px solid #cbd5ff;
-      font-size:12px;
-      margin-left:8px;
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: var(--chip);
+      color: var(--chip-text);
+      border: 1px solid #cbd5ff;
+      font-size: 12px;
+      margin-left: 8px;
     }
-    #setStatus{
-      margin-top:8px;
-      color:var(--muted);
-      font-size:12px;
-      line-height:1.4;
+
+    #setStatus {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
       max-width: 1200px;
     }
 
-    .list-item{
+    .list-item {
       border-bottom: 1px solid var(--line);
       padding: 8px 6px;
       cursor: pointer;
     }
-    .list-item:hover{ background:#f7fbff; }
-    .nameLine{ display:flex; justify-content:space-between; gap:8px; }
-    .nameLine b{ font-size:14px; }
-    .metaLine{ margin-top:4px; color:var(--muted); display:flex; gap:10px; flex-wrap:wrap; }
-    .badge{
-      display:inline-flex; align-items:center; gap:6px;
-      padding:2px 8px; border-radius:999px;
-      border:1px solid var(--line);
-      background:#fff;
-      font-size:12px;
-      color:#111;
-    }
-    .badge small{ color:var(--muted); font-size:11px; }
 
-    .popup h3{ margin:0 0 6px 0; font-size:16px; }
-    .popup .p{ margin:4px 0; font-size:13px; }
-    .wxgrid{
-      margin-top:6px;
-      border-top:1px solid #eee;
-      padding-top:6px;
-      display:grid;
-      grid-template-columns: 1fr;
-      gap:6px;
-      font-size:12px;
+    .list-item:hover {
+      background: #f7fbff;
     }
-    .wxrow{ display:flex; justify-content:space-between; gap:10px; }
-    .wxrow .k{ color:var(--muted); }
-    .scoreA{ color:#1b7f2a; font-weight:700; }
-    .scoreB{ color:#a77700; font-weight:700; }
-    .scoreC{ color:#b42318; font-weight:700; }
+
+    .nameLine {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .nameLine b {
+      font-size: 14px;
+    }
+
+    .metaLine {
+      margin-top: 4px;
+      color: var(--muted);
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: #fff;
+      font-size: 12px;
+      color: #111;
+    }
+
+    .badge small {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .popup h3 {
+      margin: 0 0 6px 0;
+      font-size: 16px;
+    }
+
+    .popup .p {
+      margin: 4px 0;
+      font-size: 13px;
+    }
+
+    .wxgrid {
+      margin-top: 6px;
+      border-top: 1px solid #eee;
+      padding-top: 6px;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 6px;
+      font-size: 12px;
+    }
+
+    .wxrow {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .wxrow .k {
+      color: var(--muted);
+    }
+
+    .scoreA {
+      color: #1b7f2a;
+      font-weight: 700;
+    }
+
+    .scoreB {
+      color: #a77700;
+      font-weight: 700;
+    }
+
+    .scoreC {
+      color: #b42318;
+      font-weight: 700;
+    }
 
     /* スマホ */
-    @media (max-width: 780px){
-      #container{ flex-direction:column; }
-      #list{ width:auto; max-height: 38vh; border-right:none; border-bottom:1px solid var(--line); }
-      #map{ height: calc(100vh - 64px - 38vh); }
+    @media (max-width: 780px) {
+      #container {
+        flex-direction: column;
+      }
+
+      #list {
+        width: auto;
+        max-height: 38vh;
+        border-right: none;
+        border-bottom: 1px solid var(--line);
+      }
+
+      #map {
+        height: calc(100vh - 64px - 38vh);
+      }
     }
   </style>
 </head>
@@ -172,21 +274,27 @@
     <div id="map"></div>
   </div>
 
-  
+
   <!-- Fullscreen overlay for mountain details (kept hidden; shown on pin click) -->
   <div id="mountainOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:9999;">
-    <div style="position:absolute; inset:16px; background:#fff; border-radius:12px; overflow:auto; box-shadow:0 10px 30px rgba(0,0,0,.25);">
-      <div style="position:sticky; top:0; display:flex; gap:8px; align-items:center; justify-content:space-between; padding:12px 12px; border-bottom:1px solid #e7e7e7; background:#fff;">
+    <div
+      style="position:absolute; inset:16px; background:#fff; border-radius:12px; overflow:auto; box-shadow:0 10px 30px rgba(0,0,0,.25);">
+      <div
+        style="position:sticky; top:0; display:flex; gap:8px; align-items:center; justify-content:space-between; padding:12px 12px; border-bottom:1px solid #e7e7e7; background:#fff;">
         <div id="mountainOverlayTitle" style="font-weight:700;"></div>
-        <button id="mountainOverlayClose" style="border:1px solid #ddd; background:#fff; border-radius:10px; padding:6px 10px; cursor:pointer;">閉じる</button>
+        <button id="mountainOverlayClose"
+          style="border:1px solid #ddd; background:#fff; border-radius:10px; padding:6px 10px; cursor:pointer;">閉じる</button>
       </div>
       <div id="mountainOverlayBody" style="padding:12px 12px;"></div>
     </div>
   </div>
 
   <!-- Loading overlay (blocks UI only while fetching) -->
-  <div id="loadingOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:9998; align-items:center; justify-content:center;">
-    <div style="background:#fff; padding:14px 16px; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.25); font-weight:700;">NowLoading…</div>
+  <div id="loadingOverlay"
+    style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:9998; align-items:center; justify-content:center;">
+    <div
+      style="background:#fff; padding:14px 16px; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.25); font-weight:700;">
+      NowLoading…</div>
   </div>
 
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
@@ -196,47 +304,47 @@
     import { generateWeatherScore } from "./weather.js";
 
     /* ========= time UI ========= */
-    const timeSlots  = ["06:00","08:00","10:00","12:00","14:00","16:00"];
-    const timeLabels = ["06–08","08–10","10–12","12–14","14–16","16–18"];
+    const timeSlots = ["06:00", "08:00", "10:00", "12:00", "14:00", "16:00"];
+    const timeLabels = ["06–08", "08–10", "10–12", "12–14", "14–16", "16–18"];
     const slider = document.getElementById("timeSlider");
     const timeLabel = document.getElementById("timeLabel");
     const daySelect = document.getElementById("day");
 
-    function pad2(n){ return String(n).padStart(2,"0"); }
-    const WDS = ["日","月","火","水","木","金","土"];
-    function getDateObj(offset){
-      const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()+offset);
+    function pad2(n) { return String(n).padStart(2, "0"); }
+    const WDS = ["日", "月", "火", "水", "木", "金", "土"];
+    function getDateObj(offset) {
+      const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + offset);
       return d;
     }
-    function formatLocalYMD(d){ return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
-    function getDateKey(offset){ return formatLocalYMD(getDateObj(offset)); }
-    function dayLabel(offset){
+    function formatLocalYMD(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
+    function getDateKey(offset) { return formatLocalYMD(getDateObj(offset)); }
+    function dayLabel(offset) {
       const d = getDateObj(offset);
-      const mm = pad2(d.getMonth()+1), dd = pad2(d.getDate()), wd = WDS[d.getDay()];
+      const mm = pad2(d.getMonth() + 1), dd = pad2(d.getDate()), wd = WDS[d.getDay()];
       const rel = offset === 0 ? "今日" : `${offset}日後`;
       return `${mm}/${dd}(${wd}) ${rel}`;
     }
-    function initDaySelectLabels(){
+    function initDaySelectLabels() {
       [...daySelect.options].forEach(opt => opt.textContent = dayLabel(Number(opt.value)));
     }
     initDaySelectLabels();
 
-    function nearestTimeSlotIndexNow(){
+    function nearestTimeSlotIndexNow() {
       const now = new Date();
-      const nowMin = now.getHours()*60 + now.getMinutes();
-      const starts = timeSlots.map(s => Number(s.slice(0,2))*60);
+      const nowMin = now.getHours() * 60 + now.getMinutes();
+      const starts = timeSlots.map(s => Number(s.slice(0, 2)) * 60);
       let best = 0, bestDiff = Infinity;
       starts.forEach((m, i) => {
         const diff = Math.abs(nowMin - m);
-        if (diff < bestDiff){ bestDiff = diff; best = i; }
+        if (diff < bestDiff) { bestDiff = diff; best = i; }
       });
       if (nowMin < starts[0]) return 0;
-      if (nowMin > starts[starts.length-1]) return starts.length-1;
+      if (nowMin > starts[starts.length - 1]) return starts.length - 1;
       return best;
     }
 
-    function getSelectedTimeSlot(){ return timeSlots[Number(slider.value)]; }
-    function getDateOffset(){ return Number(daySelect.value); }
+    function getSelectedTimeSlot() { return timeSlots[Number(slider.value)]; }
+    function getDateOffset() { return Number(daySelect.value); }
 
     slider.addEventListener("input", () => {
       timeLabel.textContent = timeLabels[Number(slider.value)];
@@ -244,7 +352,7 @@
     });
 
     daySelect.addEventListener("change", () => {
-      if (Number(daySelect.value) === 0){
+      if (Number(daySelect.value) === 0) {
         slider.value = String(nearestTimeSlotIndexNow());
         timeLabel.textContent = timeLabels[Number(slider.value)];
       }
@@ -253,34 +361,34 @@
 
     /* ========= filters ========= */
     const scoreChecks = () => [...document.querySelectorAll('input[type="checkbox"][value="A"],input[type="checkbox"][value="B"],input[type="checkbox"][value="C"]')]
-      .filter(x=>x.checked).map(x=>x.value);
+      .filter(x => x.checked).map(x => x.value);
 
     const levelChecks = () => [...document.querySelectorAll('input[type="checkbox"][value="初級"],input[type="checkbox"][value="中級"],input[type="checkbox"][value="上級"]')]
-      .filter(x=>x.checked).map(x=>x.value);
+      .filter(x => x.checked).map(x => x.value);
 
     const goodOnly = document.getElementById("goodOnly");
 
     const setHYAKU = document.getElementById("setHYAKU");
-    const setHANA  = document.getElementById("setHANA");
-    const setN200  = document.getElementById("setN200");
+    const setHANA = document.getElementById("setHANA");
+    const setN200 = document.getElementById("setN200");
 
     const setStatus = document.getElementById("setStatus");
     const countChip = document.getElementById("countChip");
 
-    function escapeHtml(s){
+    function escapeHtml(s) {
       return String(s ?? "").replace(/[&<>"']/g, c => ({
-        "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
       }[c]));
     }
-    function setStatusHtml(lines){
+    function setStatusHtml(lines) {
       const safe = (lines || []).filter(Boolean).slice(0, 14).map(escapeHtml);
       setStatus.innerHTML = safe.join("<br>");
     }
 
-    function normName(s){
-      return String(s||"")
-        .replace(/\s+/g,"")
-        .replace(/[‐-–—−]/g,"-")
+    function normName(s) {
+      return String(s || "")
+        .replace(/\s+/g, "")
+        .replace(/[‐-–—−]/g, "-")
         .trim();
     }
 
@@ -289,39 +397,39 @@
        - mountains_extra.js は _sets を尊重
        - 同名は統合して _sets を union
     */
-    function withDefaultSets(m){
+    function withDefaultSets(m) {
       const sets = Array.isArray(m._sets) ? m._sets.slice() : [];
       // 百名山側はHYAKUを付与
       if (!sets.includes("HYAKU") && m.__from === "BASE") sets.push("HYAKU");
       return { ...m, _sets: sets };
     }
 
-    function mergeAll(base, extra){
+    function mergeAll(base, extra) {
       const map = new Map();
 
       base.forEach(m => {
         const key = normName(m.name);
-        const mm = withDefaultSets({ ...m, __from:"BASE" });
+        const mm = withDefaultSets({ ...m, __from: "BASE" });
         map.set(key, mm);
       });
 
       (extra || []).forEach(m => {
         const key = normName(m.name);
         if (!key) return;
-        const ex = withDefaultSets({ ...m, __from:"EXTRA" });
+        const ex = withDefaultSets({ ...m, __from: "EXTRA" });
         const cur = map.get(key);
-        if (!cur){
+        if (!cur) {
           map.set(key, ex);
-        }else{
+        } else {
           // 既存優先で座標/標高などは欠けを補完、_sets は union
-          const sets = Array.from(new Set([...(cur._sets||[]), ...(ex._sets||[])]));
+          const sets = Array.from(new Set([...(cur._sets || []), ...(ex._sets || [])]));
           map.set(key, {
             ...cur,
-            lat:  (cur.lat  ?? ex.lat  ?? null),
-            lng:  (cur.lng  ?? ex.lng  ?? null),
+            lat: (cur.lat ?? ex.lat ?? null),
+            lng: (cur.lng ?? ex.lng ?? null),
             elev: (cur.elev ?? ex.elev ?? null),
-            level:(cur.level?? ex.level?? "中級"),
-            gpx:  (cur.gpx  ?? ex.gpx  ?? null),
+            level: (cur.level ?? ex.level ?? "中級"),
+            gpx: (cur.gpx ?? ex.gpx ?? null),
             _sets: sets
           });
         }
@@ -337,11 +445,11 @@
 
     // 地理院 標準地図 + 陰影（元の方針維持）
     L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png",
-      { attribution:"地理院タイル", opacity:0.85 }
+      { attribution: "地理院タイル", opacity: 0.85 }
     ).addTo(mapObj);
 
     L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/hillshademap/{z}/{x}/{y}.png",
-      { attribution:"地理院 陰影", opacity:0.45 }
+      { attribution: "地理院 陰影", opacity: 0.45 }
     ).addTo(mapObj);
 
     const markerLayer = L.layerGroup().addTo(mapObj);
@@ -349,14 +457,14 @@
     /* ========= marker icons =========
        ✅ “チープ”対策：Leafletカラー標準マーカーに戻す（見た目が安定）
     */
-    function icon(color){
+    function icon(color) {
       return L.icon({
         iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-${color}.png`,
         shadowUrl: "https://unpkg.com/leaflet/dist/images/marker-shadow.png",
-        iconSize:[25,41],
-        iconAnchor:[12,41],
-        popupAnchor:[1,-34],
-        shadowSize:[41,41],
+        iconSize: [25, 41],
+        iconAnchor: [12, 41],
+        popupAnchor: [1, -34],
+        shadowSize: [41, 41],
       });
     }
     const ICONS = {
@@ -369,17 +477,17 @@
     /* ========= weather cache in memory ========= */
     // mountainKey -> weatherObject
     const WX = new Map();
-    const WX_META = { ok:0, ng:0, cacheHit:0, lastErr:"" };
+    const WX_META = { ok: 0, ng: 0, cacheHit: 0, lastErr: "" };
 
     const WX_INFLIGHT = new Map(); // key -> Promise
     const WX_FAIL = new Map(); // key -> retryAfter(ms)
 
 
-    async function ensureWeatherFor(m){
+    async function ensureWeatherFor(m) {
       const key = normName(m.name);
 
       // 取得済みは即返す（チェックON/OFFで灰色に戻さない）
-      if (WX.has(key)) { WX_META.cacheHit = (WX_META.cacheHit||0) + 1; return WX.get(key); }
+      if (WX.has(key)) { WX_META.cacheHit = (WX_META.cacheHit || 0) + 1; return WX.get(key); }
 
       const now = Date.now();
       const retryAfter = WX_FAIL.get(key) || 0;
@@ -389,18 +497,18 @@
       if (WX_INFLIGHT.has(key)) return WX_INFLIGHT.get(key);
 
       const p = (async () => {
-        try{
+        try {
           const w = await generateWeatherScore(m.name, m.lat, m.lng, m.level || "中級", m.elev ?? null);
           WX.set(key, w);
           WX_META.ok++;
           return w;
-        }catch(e){
+        } catch (e) {
           WX_META.ng++;
           WX_META.lastErr = String(e?.message || e);
           // 失敗を null で固定キャッシュしない（以後も取得できなくなるのを防ぐ）
           WX_FAIL.set(key, Date.now() + 30_000);
           return null;
-        }finally{
+        } finally {
           WX_INFLIGHT.delete(key);
         }
       })();
@@ -409,15 +517,13 @@
       return p;
     }
 
-    }
-
-    function scoreAt(m, dateKey, timeSlot){
+    function scoreAt(m, dateKey, timeSlot) {
       const w = WX.get(normName(m.name));
       if (!w) return null;
       return w?.[dateKey]?.[timeSlot] ?? null;
     }
 
-    function detailAt(m, dateKey, timeSlot){
+    function detailAt(m, dateKey, timeSlot) {
       const w = WX.get(normName(m.name));
       if (!w) return null;
       // ✅ “降水/風/突風/気温が表示されない”の主因：__detail を読む
@@ -425,35 +531,35 @@
     }
 
     /* ========= set filter ========= */
-    function selectedSets(){
+    function selectedSets() {
       const s = [];
       if (setHYAKU.checked) s.push("HYAKU");
-      if (setHANA.checked)  s.push("HANA_100");
-      if (setN200.checked)  s.push("NIHON_200");
+      if (setHANA.checked) s.push("HANA_100");
+      if (setN200.checked) s.push("NIHON_200");
       return s;
     }
-    function inSelectedSets(m){
+    function inSelectedSets(m) {
       const want = selectedSets();
       const has = Array.isArray(m._sets) ? m._sets : [];
       return want.some(k => has.includes(k));
     }
 
     /* ========= list & popup ========= */
-    function scoreClass(s){
-      if (s==="A") return "scoreA";
-      if (s==="B") return "scoreB";
-      if (s==="C") return "scoreC";
+    function scoreClass(s) {
+      if (s === "A") return "scoreA";
+      if (s === "B") return "scoreB";
+      if (s === "C") return "scoreC";
       return "";
     }
 
 
-    function scoreTableHtml(m){
+    function scoreTableHtml(m) {
       const w = WX.get(normName(m.name));
       if (!w) return `<div class="p" style="color:var(--muted)">天気未取得</div>`;
 
-      const days = [0,1,2,3];
+      const days = [0, 1, 2, 3];
       const cols = days.map(d => ({ key: getDateKey(d), label: dayLabel(d) }));
-      const head = `<tr><th>時間</th>` + cols.map(c=>`<th>${escapeHtml(c.label)}</th>`).join("") + `</tr>`;
+      const head = `<tr><th>時間</th>` + cols.map(c => `<th>${escapeHtml(c.label)}</th>`).join("") + `</tr>`;
 
       const body = timeSlots.map((ts, i) => {
         const rowLabel = timeLabels[i] || ts;
@@ -471,7 +577,7 @@
       `;
     }
 
-    function popupHtml(m){
+    function popupHtml(m) {
       const dateOffset = getDateOffset();
       const dateKey = getDateKey(dateOffset);
 
@@ -491,10 +597,10 @@
         `;
       }).join("");
 
-      const sets = (m._sets||[]).map(x=>{
-        if (x==="HYAKU") return "百";
-        if (x==="HANA_100") return "花";
-        if (x==="NIHON_200") return "200";
+      const sets = (m._sets || []).map(x => {
+        if (x === "HYAKU") return "百";
+        if (x === "HANA_100") return "花";
+        if (x === "NIHON_200") return "200";
         return x;
       }).join(" / ");
 
@@ -520,27 +626,27 @@
 
     const mountainOverlay = document.getElementById("mountainOverlay");
     const mountainOverlayTitle = document.getElementById("mountainOverlayTitle");
-    const mountainOverlayBody  = document.getElementById("mountainOverlayBody");
+    const mountainOverlayBody = document.getElementById("mountainOverlayBody");
     const mountainOverlayClose = document.getElementById("mountainOverlayClose");
 
-    function openMountainOverlay(m){
+    function openMountainOverlay(m) {
       mountainOverlayTitle.textContent = m.name || "";
       mountainOverlayBody.innerHTML = popupHtml(m);
       mountainOverlay.style.display = "block";
     }
-    function closeMountainOverlay(){
+    function closeMountainOverlay() {
       mountainOverlay.style.display = "none";
     }
     mountainOverlayClose?.addEventListener("click", closeMountainOverlay);
-    mountainOverlay?.addEventListener("click", (e)=>{
+    mountainOverlay?.addEventListener("click", (e) => {
       if (e.target === mountainOverlay) closeMountainOverlay();
     });
 
     const loadingOverlay = document.getElementById("loadingOverlay");
-    function showLoading(){
+    function showLoading() {
       if (loadingOverlay) loadingOverlay.style.display = "flex";
     }
-    function hideLoading(){
+    function hideLoading() {
       if (loadingOverlay) loadingOverlay.style.display = "none";
     }
 
@@ -548,9 +654,9 @@
     /* ========= draw ========= */
     const listEl = document.getElementById("list");
 
-    function computeCounts(){
-      let hy=0, ha=0, n2=0, all=0;
-      for (const m of ALL){
+    function computeCounts() {
+      let hy = 0, ha = 0, n2 = 0, all = 0;
+      for (const m of ALL) {
         if (m?.lat == null || m?.lng == null) continue;
         all++;
         const s = m._sets || [];
@@ -561,7 +667,7 @@
       return { hy, ha, n2, total: all };
     }
 
-    function visibleMountains(){
+    function visibleMountains() {
       const scores = scoreChecks();
       const levels = levelChecks();
       const onlyGood = goodOnly.checked;
@@ -582,23 +688,23 @@
         });
     }
 
-    function sortKey(m){
+    function sortKey(m) {
       // A優先 / 次に標高高い順 / 名前
       const dateKey = getDateKey(getDateOffset());
       const timeSlot = getSelectedTimeSlot();
       const s = scoreAt(m, dateKey, timeSlot);
-      const pri = (s==="A") ? 0 : (s==="B") ? 1 : (s==="C") ? 2 : 3;
+      const pri = (s === "A") ? 0 : (s === "B") ? 1 : (s === "C") ? 2 : 3;
       return { pri, elev: -(m.elev ?? 0), name: m.name };
     }
 
     const MARKERS = new Map(); // nameKey -> marker
 
-    function refreshCountsUI(){
+    function refreshCountsUI() {
       const c = computeCounts();
       countChip.textContent = `登録(座標あり): 百=${c.hy} / 花=${c.ha} / 200=${c.n2}`;
     }
 
-    function refreshStatusUI(extraLines=[]){
+    function refreshStatusUI(extraLines = []) {
       const lines = [
         `天気取得: OK=${WX_META.ok} / NG=${WX_META.ng}`,
         WX_META.lastErr ? `直近エラー: ${WX_META.lastErr}` : "",
@@ -607,7 +713,7 @@
       setStatusHtml(lines);
     }
 
-    function draw(){
+    function draw() {
       refreshCountsUI();
 
       // marker update
@@ -618,7 +724,7 @@
       const timeSlot = getSelectedTimeSlot();
 
       const vis = visibleMountains()
-        .sort((a,b)=>{
+        .sort((a, b) => {
           const A = sortKey(a), B = sortKey(b);
           if (A.pri !== B.pri) return A.pri - B.pri;
           if (A.elev !== B.elev) return A.elev - B.elev;
@@ -627,12 +733,12 @@
 
       // list
       listEl.innerHTML = "";
-      for (const m of vis){
+      for (const m of vis) {
         const sc = scoreAt(m, dateKey, timeSlot) || "—";
-        const sets = (m._sets||[]).map(x=>{
-          if (x==="HYAKU") return "百";
-          if (x==="HANA_100") return "花";
-          if (x==="NIHON_200") return "200";
+        const sets = (m._sets || []).map(x => {
+          if (x === "HYAKU") return "百";
+          if (x === "HANA_100") return "花";
+          if (x === "NIHON_200") return "200";
           return x;
         }).join("/");
 
@@ -651,8 +757,8 @@
         `;
         item.addEventListener("click", () => {
           const mk = MARKERS.get(normName(m.name));
-          if (mk){
-            mapObj.setView([m.lat, m.lng], Math.max(mapObj.getZoom(), 9), { animate:true });
+          if (mk) {
+            mapObj.setView([m.lat, m.lng], Math.max(mapObj.getZoom(), 9), { animate: true });
             mk.openPopup();
           }
         });
@@ -660,7 +766,7 @@
 
         // marker
         const marker = L.marker([m.lat, m.lng], { icon: ICONS.N });
-                marker.on("click", () => openMountainOverlay(m));
+        marker.on("click", () => openMountainOverlay(m));
         marker.addTo(markerLayer);
         MARKERS.set(normName(m.name), marker);
       }
@@ -674,12 +780,12 @@
     /* ========= auto prefetch (rate limited) ========= */
     let PREFETCH_RUNNING = false;
 
-    async function prefetchWeather(list){
+    async function prefetchWeather(list) {
       if (PREFETCH_RUNNING) return;
       PREFETCH_RUNNING = true;
       showLoading();
 
-      try{
+      try {
         // 一気に投げると 429 になるので、少数並列 + 待ち
         const concurrency = 3;
         const queue = list.filter(m => {
@@ -689,8 +795,8 @@
         });
         let idx = 0;
 
-        async function worker(){
-          while (idx < queue.length){
+        async function worker() {
+          while (idx < queue.length) {
             const m = queue[idx++];
             await ensureWeatherFor(m);
 
@@ -699,11 +805,11 @@
             const timeSlot = getSelectedTimeSlot();
             const sc = scoreAt(m, dateKey, timeSlot);
             const mk = MARKERS.get(normName(m.name));
-            if (mk){
+            if (mk) {
               mk.setIcon(ICONS[sc] || ICONS.N);
             }
             // オーバーレイ表示中の山なら中身も更新
-            if (mountainOverlay && mountainOverlay.style.display === "block" && mountainOverlayTitle?.textContent === m.name){
+            if (mountainOverlay && mountainOverlay.style.display === "block" && mountainOverlayTitle?.textContent === m.name) {
               mountainOverlayBody.innerHTML = popupHtml(m);
             }
 
@@ -712,17 +818,17 @@
           }
         }
 
-        await Promise.all(Array.from({length:concurrency}, worker));
+        await Promise.all(Array.from({ length: concurrency }, worker));
         refreshStatusUI([`天気先読み完了（未取得対象 ${queue.length}件 / 表示中 ${list.length}件）`]);
 
-      }finally{
+      } finally {
         PREFETCH_RUNNING = false;
         hideLoading();
       }
     }
 
     /* ========= events ========= */
-    document.querySelectorAll('#control input[type="checkbox"]').forEach(el=>{
+    document.querySelectorAll('#control input[type="checkbox"]').forEach(el => {
       el.addEventListener("change", draw);
     });
 
@@ -732,4 +838,5 @@
     draw();
   </script>
 </body>
+
 </html>
