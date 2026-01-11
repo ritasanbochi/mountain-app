@@ -1,13 +1,16 @@
 // weather.js
 // Open-Meteo forecast -> 独自スコア (A/B/C)
-// localStorage キャッシュあり（1時間）
+// ※localStorage は使わない（座標/天気とも永続キャッシュ廃止方針）
 // 429対策: 429/5xx は指数バックオフでリトライ
 
 const OPEN_METEO_ENDPOINT = "https://api.open-meteo.com/v1/forecast";
 const TIMEZONE = "Asia/Tokyo";
 
-const CACHE_PREFIX = "wx_cache_v6:";
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1時間
+
+// セッション内メモリキャッシュ（リロードで消える）
+// key -> { savedAt:number, data:any }
+const MEM_CACHE = new Map();
 
 // UI時間帯（index.htmlと合わせる）
 const TIME_SLOTS = ["06:00", "08:00", "10:00", "12:00", "14:00", "16:00"];
@@ -22,28 +25,20 @@ function toNumber(x) {
 function cacheKey(lat, lng) {
   const la = Number(lat).toFixed(5);
   const lo = Number(lng).toFixed(5);
-  return `${CACHE_PREFIX}${la},${lo}`;
+  return `${la},${lo}`;
 }
 
 function loadCache(lat, lng) {
-  try {
-    const raw = localStorage.getItem(cacheKey(lat, lng));
-    if (!raw) return null;
-    const obj = JSON.parse(raw);
-    if (!obj || !obj.savedAt || !obj.data) return null;
-    if ((Date.now() - obj.savedAt) > CACHE_TTL_MS) return null;
-    return obj.data;
-  } catch {
-    return null;
-  }
+  const key = cacheKey(lat, lng);
+  const obj = MEM_CACHE.get(key);
+  if (!obj || !obj.savedAt || !obj.data) return null;
+  if ((Date.now() - obj.savedAt) > CACHE_TTL_MS) return null;
+  return obj.data;
 }
 
 function saveCache(lat, lng, data) {
-  try {
-    localStorage.setItem(cacheKey(lat, lng), JSON.stringify({ savedAt: Date.now(), data }));
-  } catch {
-    // QuotaExceeded等は無視（表示自体は継続）
-  }
+  const key = cacheKey(lat, lng);
+  MEM_CACHE.set(key, { savedAt: Date.now(), data });
 }
 
 async function fetchOpenMeteo(lat, lng){

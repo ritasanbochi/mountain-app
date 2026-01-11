@@ -352,20 +352,30 @@
     /* ========= weather cache in memory ========= */
     // mountainKey -> weatherObject
     const WX = new Map();
+    // 取得失敗時に「null を固定キャッシュ」しないための、最小限の再試行抑制
+    // key -> { nextAt:number }
+    const WX_FAIL = new Map();
     const WX_META = { ok:0, ng:0, cacheHit:0, lastErr:"" };
 
     async function ensureWeatherFor(m){
       const key = normName(m.name);
       if (WX.has(key)) return WX.get(key);
 
+      // 直近失敗したものは少し待つ（連続リクエストで429を誘発しない）
+      const fail = WX_FAIL.get(key);
+      if (fail && Date.now() < fail.nextAt) return null;
+
       try{
         // generateWeatherScore の返り値は weather[dateKey][time] と weather.__detail が前提 :contentReference[oaicite:1]{index=1}
         const w = await generateWeatherScore(m.name, m.lat, m.lng, m.level || "中級", m.elev ?? null);
         WX.set(key, w);
+        WX_FAIL.delete(key);
         WX_META.ok++;
         return w;
       }catch(e){
-        WX.set(key, null);
+        // ❗失敗を null で固定キャッシュしない（= 次のprefetchで再試行できる）
+        // ただし即リトライ地獄にならないよう、山ごとに小さく待つ
+        WX_FAIL.set(key, { nextAt: Date.now() + 30_000 });
         WX_META.ng++;
         WX_META.lastErr = String(e?.message || e);
         return null;
