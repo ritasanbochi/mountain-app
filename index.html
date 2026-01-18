@@ -261,7 +261,7 @@
         <b>表示セット</b>
         <label class="cb" style="min-width:170px;"><span>百名山</span><input type="checkbox" id="setHYAKU" checked></label>
         <label class="cb" style="min-width:170px;"><span>花の百名山</span><input type="checkbox" id="setHANA"></label>
-        <label class="cb" style="min-width:170px;"><span>二百名山</span><input type="checkbox" id="setN200"></label>
+        <!-- <label class="cb" style="min-width:170px;"><span>二百名山</span><input type="checkbox" id="setN200"></label> -->
         <span class="chip" id="countChip">読込中...</span>
         <button id="refreshWeather"
           style="padding:6px 12px; border:1px solid var(--line); background:#fff; border-radius:8px; cursor:pointer; font-size:13px;">🔄
@@ -401,10 +401,8 @@
        - 同名は統合して _sets を union
     */
     function withDefaultSets(m) {
-      const sets = Array.isArray(m._sets) ? m._sets.slice() : [];
-      // 百名山側はHYAKUを付与
-      if (!sets.includes("HYAKU") && m.__from === "BASE") sets.push("HYAKU");
-      return { ...m, _sets: sets };
+      // CSVから読み込んだ _sets をそのまま使う（デフォルト付与ロジック削除）
+      return { ...m, _sets: Array.isArray(m._sets) ? m._sets.slice() : [] };
     }
 
     function mergeAll(base, extra) {
@@ -536,9 +534,9 @@
     /* ========= set filter ========= */
     function selectedSets() {
       const s = [];
-      if (setHYAKU.checked) s.push("HYAKU");
+      if (setHYAKU.checked) s.push("NIHON_100");
       if (setHANA.checked) s.push("HANA_100");
-      if (setN200.checked) s.push("NIHON_200");
+      // if (setN200.checked) s.push("NIHON_200"); // フィルタ無効化
       return s;
     }
     function inSelectedSets(m) {
@@ -601,9 +599,8 @@
       }).join("");
 
       const sets = (m._sets || []).map(x => {
-        if (x === "HYAKU") return "百";
+        if (x === "NIHON_100") return "百";
         if (x === "HANA_100") return "花";
-        if (x === "NIHON_200") return "200";
         return x;
       }).join(" / ");
 
@@ -663,9 +660,9 @@
         if (m?.lat == null || m?.lng == null) continue;
         all++;
         const s = m._sets || [];
-        if (s.includes("HYAKU")) hy++;
+        if (s.includes("NIHON_100")) hy++;
         if (s.includes("HANA_100")) ha++;
-        if (s.includes("NIHON_200")) n2++;
+        // if (s.includes("NIHON_200")) n2++;
       }
       return { hy, ha, n2, total: all };
     }
@@ -739,9 +736,8 @@
       for (const m of vis) {
         const sc = scoreAt(m, dateKey, timeSlot) || "—";
         const sets = (m._sets || []).map(x => {
-          if (x === "HYAKU") return "百";
+          if (x === "NIHON_100") return "百";
           if (x === "HANA_100") return "花";
-          if (x === "NIHON_200") return "200";
           return x;
         }).join("/");
 
