@@ -202,6 +202,54 @@
       font-weight: 700;
     }
 
+
+    /* 天気スコア表のスタイル改善 */
+    .wxTableWrap {
+      width: 100%;
+      overflow-x: auto;
+      margin-top: 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+    }
+
+    .wxScoreTable {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      min-width: 300px;
+    }
+
+    .wxScoreTable th,
+    .wxScoreTable td {
+      padding: 8px 4px;
+      text-align: center;
+      white-space: nowrap;
+      border-bottom: 1px solid #eee;
+    }
+
+    .wxScoreTable th {
+      background: #f7f9fc;
+      color: var(--muted);
+      font-weight: normal;
+      font-size: 11px;
+    }
+
+    .wxScoreTable td.k {
+      text-align: left;
+      color: #444;
+      font-weight: 500;
+      position: sticky;
+      left: 0;
+      background: #fff;
+      border-right: 1px solid #eee;
+      padding-left: 8px;
+      z-index: 10;
+    }
+
+    .wxScoreTable tr:last-child td {
+      border-bottom: none;
+    }
+
     /* スマホ */
     @media (max-width: 780px) {
       #container {
