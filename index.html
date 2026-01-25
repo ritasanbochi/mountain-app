@@ -250,23 +250,16 @@
       border-bottom: none;
     }
 
-    #mobileToggle {
+    #controlHeader {
       display: none;
-      position: fixed;
-      bottom: 24px;
-      right: 20px;
-      /* ズームコントロールなどに被らない位置 */
-      z-index: 9990;
-      /* オーバーレイよりは下 */
-      background: #fff;
-      color: #333;
-      border: 1px solid #ccc;
-      border-radius: 30px;
-      padding: 10px 18px;
-      font-size: 14px;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 4px 8px 4px;
+      margin-bottom: 4px;
       font-weight: 700;
-      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
       cursor: pointer;
+      color: var(--muted);
+      border-bottom: 1px solid transparent;
     }
 
     /* スマホ */
@@ -275,39 +268,63 @@
         flex-direction: column;
       }
 
-      #mobileToggle {
-        display: block;
-      }
-
-      /* マップのみモード */
-      body.map-only #control,
-      body.map-only #list {
-        display: none !important;
-      }
-
-
-
-      body.map-only #map {
-        height: 100vh;
-      }
-
+      /* リストはスマホでは非表示 */
       #list {
-        width: auto;
-        max-height: 38vh;
-        border-right: none;
-        border-bottom: 1px solid var(--line);
+        display: none;
+      }
+
+      /* コントロールパネルのアコーディオン化 */
+      #control {
+        transition: max-height 0.3s ease;
+        overflow: hidden;
+        max-height: 1000px;
+        /* 開いた状態（十分な高さ） */
+        position: relative;
+        z-index: 2000;
+        border-bottom: 1px solid #ccc;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+      }
+
+      /* 閉じた状態 */
+      #control.collapsed {
+        max-height: 48px;
+        /* ヘッダーの高さ */
+        border-bottom: none;
+        box-shadow: none;
+      }
+
+      #controlHeader {
+        display: flex;
+        /* 少しボーダーを出して「押せる」感を出す */
+        border-bottom: 1px solid #eee;
+      }
+
+      /* 閉じた時のヘッダー装飾 */
+      #control.collapsed #controlHeader {
+        margin-bottom: 0;
+        border-bottom: none;
       }
 
       #map {
-        height: calc(100vh - 64px - 38vh);
+        /* コントロール（可変）を除いた残り全て */
+        height: 100vh;
+        /* 実際にはflexで自動調整されるが、念のため */
+        flex: 1;
       }
     }
   </style>
 </head>
 
 <body>
-  <button id="mobileToggle">🗺️ 地図のみ</button>
+  <!-- スマホ用トグルボタンは削除し、control自体を開閉式にする -->
+
   <div id="control">
+    <!-- スマホ用開閉ヘッダー -->
+    <div id="controlHeader">
+      <span>⚙️ 設定・フィルター</span>
+      <span id="toggleIcon">▲</span>
+    </div>
+
     <div class="row">
       <div class="seg">
         <b>日付</b>
@@ -397,17 +414,26 @@
     const timeLabel = document.getElementById("timeLabel");
     const daySelect = document.getElementById("day");
 
-    // スマホ用トグル
-    const mobileToggle = document.getElementById("mobileToggle");
-    mobileToggle?.addEventListener("click", () => {
-      document.body.classList.toggle("map-only");
-      const isMapOnly = document.body.classList.contains("map-only");
-      mobileToggle.textContent = isMapOnly ? "⚙️ 設定/リスト" : "🗺️ 地図のみ";
+    // スマホ用アコーディオン制御
+    const controlEl = document.getElementById("control");
+    const controlHeader = document.getElementById("controlHeader");
+    const toggleIcon = document.getElementById("toggleIcon");
 
-      // 表示領域が変わるため地図サイズを再計算
+    // 初期状態：スマホなら閉じる
+    if (window.innerWidth <= 780) {
+      controlEl.classList.add("collapsed");
+      if (toggleIcon) toggleIcon.textContent = "▼";
+    }
+
+    controlHeader?.addEventListener("click", () => {
+      controlEl.classList.toggle("collapsed");
+      const isClosed = controlEl.classList.contains("collapsed");
+      if (toggleIcon) toggleIcon.textContent = isClosed ? "▼" : "▲";
+
+      // 開閉アニメーション後に地図リサイズ（必須）
       setTimeout(() => {
         if (typeof mapObj !== "undefined") mapObj.invalidateSize();
-      }, 100); // 少し待ってから実行
+      }, 350);
     });
 
     function pad2(n) { return String(n).padStart(2, "0"); }
