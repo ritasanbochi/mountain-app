@@ -250,10 +250,47 @@
       border-bottom: none;
     }
 
+    #mobileToggle {
+      display: none;
+      position: fixed;
+      bottom: 24px;
+      right: 20px;
+      /* ズームコントロールなどに被らない位置 */
+      z-index: 9990;
+      /* オーバーレイよりは下 */
+      background: #fff;
+      color: #333;
+      border: 1px solid #ccc;
+      border-radius: 30px;
+      padding: 10px 18px;
+      font-size: 14px;
+      font-weight: 700;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+      cursor: pointer;
+    }
+
     /* スマホ */
     @media (max-width: 780px) {
       #container {
         flex-direction: column;
+      }
+
+      #mobileToggle {
+        display: block;
+      }
+
+      /* マップのみモード */
+      body.map-only #control,
+      body.map-only #list {
+        display: none !important;
+      }
+
+      body.map-only #container {
+        /* コンテナ自体も調整不要だがflexなので念のため */
+      }
+
+      body.map-only #map {
+        height: 100vh;
       }
 
       #list {
@@ -271,6 +308,7 @@
 </head>
 
 <body>
+  <button id="mobileToggle">🗺️ 地図のみ</button>
   <div id="control">
     <div class="row">
       <div class="seg">
@@ -360,6 +398,14 @@
     const slider = document.getElementById("timeSlider");
     const timeLabel = document.getElementById("timeLabel");
     const daySelect = document.getElementById("day");
+
+    // スマホ用トグル
+    const mobileToggle = document.getElementById("mobileToggle");
+    mobileToggle?.addEventListener("click", () => {
+      document.body.classList.toggle("map-only");
+      const isMapOnly = document.body.classList.contains("map-only");
+      mobileToggle.textContent = isMapOnly ? "⚙️ 設定/リスト" : "🗺️ 地図のみ";
+    });
 
     function pad2(n) { return String(n).padStart(2, "0"); }
     const WDS = ["日", "月", "火", "水", "木", "金", "土"];
