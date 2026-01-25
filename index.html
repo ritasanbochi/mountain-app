@@ -285,9 +285,7 @@
         display: none !important;
       }
 
-      body.map-only #container {
-        /* コンテナ自体も調整不要だがflexなので念のため */
-      }
+
 
       body.map-only #map {
         height: 100vh;
@@ -405,6 +403,11 @@
       document.body.classList.toggle("map-only");
       const isMapOnly = document.body.classList.contains("map-only");
       mobileToggle.textContent = isMapOnly ? "⚙️ 設定/リスト" : "🗺️ 地図のみ";
+
+      // 表示領域が変わるため地図サイズを再計算
+      setTimeout(() => {
+        if (typeof mapObj !== "undefined") mapObj.invalidateSize();
+      }, 100); // 少し待ってから実行
     });
 
     function pad2(n) { return String(n).padStart(2, "0"); }
